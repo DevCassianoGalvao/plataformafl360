@@ -1,0 +1,26 @@
+# Dependências e cache
+/vendor/
+/node_modules/
+
+# Configuração local (contém credenciais)
+/includes/db.php
+
+# Lock de instalação
+/storage/installed.lock
+
+# Uploads de usuários
+/uploads/*
+!/uploads/.gitkeep
+
+# Logs
+*.log
+/logs/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
