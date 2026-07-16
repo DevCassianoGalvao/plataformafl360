@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
-const PROFESSIONAL_SCHEMA_VERSION = '2026-07-professores-materiais';
+const PROFESSIONAL_SCHEMA_VERSION = '2026-07-colaboracao-seguranca';
 
 function db_index_exists(PDO $pdo, string $table, string $index): bool
 {
@@ -84,7 +84,11 @@ if (is_post()) {
 }
 
 $ready = db_column_exists($pdo, 'modules', 'professor_id')
-    && db_column_exists($pdo, 'materials', 'module_id');
+    && db_column_exists($pdo, 'materials', 'module_id')
+    && db_table_exists($pdo, 'module_professors')
+    && db_column_exists($pdo, 'users', 'status')
+    && db_column_exists($pdo, 'quizzes', 'liberacao')
+    && db_column_exists($pdo, 'forum_topics', 'fixado');
 
 $active_page = 'migracoes';
 $page_title = 'Atualização do sistema';
@@ -96,7 +100,7 @@ require_once __DIR__ . '/../includes/header.php';
         <section class="panel panel-narrow">
             <span class="eyebrow">Manutenção segura</span>
             <h1>Atualização do banco</h1>
-            <p>Esta atualização adiciona professores e materiais por módulo. Nenhum usuário, módulo, aula ou material existente será removido.</p>
+            <p>Esta atualização adiciona colaboração entre professores, aprovação de cadastros, regras de quiz e moderação. Nenhum usuário, módulo, aula ou progresso existente será removido.</p>
             <div class="migration-status <?= $ready ? 'is-ready' : 'is-pending' ?>">
                 <strong><?= $ready ? 'Banco atualizado' : 'Atualização pendente' ?></strong>
                 <span><?= $ready ? 'A estrutura profissional já está disponível.' : 'Faça um backup no cPanel antes de continuar.' ?></span>

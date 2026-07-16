@@ -42,7 +42,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($dbName !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $dbName)) { $errors[] = 'Nome do banco contém caracteres inválidos.'; }
     if ($dbUser === '')    { $errors[] = 'Usuário do banco não pode ser vazio.'; }
     if (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) { $errors[] = 'E-mail do admin inválido.'; }
-    if (strlen($adminPass) < 6) { $errors[] = 'Senha do admin deve ter pelo menos 6 caracteres.'; }
+    if (strlen($adminPass) < 12 || strlen($adminPass) > 72) {
+        $errors[] = 'A senha do administrador deve ter entre 12 e 72 caracteres.';
+    }
 
     if (empty($errors)) {
         // ── Conectar
@@ -80,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foto_perfil VARCHAR(255) NULL,
                 senha       VARCHAR(255) NOT NULL,
                 role        ENUM('admin','professor','aluno') NOT NULL DEFAULT 'aluno',
+                status      ENUM('pendente','ativo','rejeitado') NOT NULL DEFAULT 'ativo',
+                email_verificado_em DATETIME NULL,
+                email_verification_hash CHAR(64) NULL,
+                email_verification_expires DATETIME NULL,
                 criado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY uq_users_email (email),
                 KEY idx_users_role (role)
@@ -95,6 +101,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 KEY idx_modules_professor (professor_id),
                 CONSTRAINT fk_modules_professor FOREIGN KEY (professor_id) REFERENCES users(id)
                     ON DELETE SET NULL ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+            'module_professors' => "CREATE TABLE IF NOT EXISTS module_professors (
+                module_id INT UNSIGNED NOT NULL,
+                user_id INT UNSIGNED NOT NULL,
+                assigned_by INT UNSIGNED NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (module_id, user_id),
+                KEY idx_module_professors_user (user_id),
+                CONSTRAINT fk_module_professors_module FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT fk_module_professors_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT fk_module_professors_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
             'lessons' => "CREATE TABLE IF NOT EXISTS lessons (
@@ -182,6 +200,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 user_id       INT UNSIGNED NOT NULL,
                 titulo        VARCHAR(200) NOT NULL,
                 mensagem      TEXT NOT NULL,
+                fixado        TINYINT(1) NOT NULL DEFAULT 0,
+                bloqueado     TINYINT(1) NOT NULL DEFAULT 0,
                 criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 KEY idx_forum_topics_atualizado (atualizado_em),
@@ -210,11 +230,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 module_id INT UNSIGNED NOT NULL,
                 titulo    VARCHAR(180) NOT NULL,
                 descricao TEXT NULL,
+                liberacao ENUM('sempre','apos_aulas') NOT NULL DEFAULT 'apos_aulas',
                 criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY uq_quizzes_module (module_id),
                 CONSTRAINT fk_quizzes_module
                     FOREIGN KEY (module_id) REFERENCES modules(id)
                     ON DELETE CASCADE ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+            'login_attempts' => "CREATE TABLE IF NOT EXISTS login_attempts (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                email_hash CHAR(64) NOT NULL,
+                ip_hash CHAR(64) NOT NULL,
+                sucesso TINYINT(1) NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_login_attempts_email_data (email_hash, criado_em),
+                KEY idx_login_attempts_ip_data (ip_hash, criado_em)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
             'quiz_questions' => "CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -276,7 +307,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $chk->execute([':email' => $adminEmail]);
             if ($chk->fetchColumn()) {
                 $success[] = "Admin <strong>{$adminEmail}</strong> já existia — senha atualizada.";
-                $upd = $pdo->prepare("UPDATE users SET nome=:nome, senha=:senha, role='admin' WHERE email=:email");
+                $upd = $pdo->prepare("UPDATE users SET nome=:nome, senha=:senha, role='admin', status='ativo', email_verificado_em=NOW() WHERE email=:email");
                 $upd->execute([
                     ':nome'  => $adminName,
                     ':senha' => password_hash($adminPass, PASSWORD_DEFAULT),
@@ -284,8 +315,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
             } else {
                 $ins = $pdo->prepare(
-                    "INSERT INTO users (nome, email, senha, role, criado_em)
-                     VALUES (:nome, :email, :senha, 'admin', NOW())"
+                    "INSERT INTO users (nome, email, senha, role, status, email_verificado_em, criado_em)
+                     VALUES (:nome, :email, :senha, 'admin', 'ativo', NOW(), NOW())"
                 );
                 $ins->execute([
                     ':nome'  => $adminName,
@@ -510,7 +541,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <label for="admin_pass">Senha do admin</label>
         <input id="admin_pass" type="password" name="admin_pass"
-               placeholder="Mínimo 6 caracteres" autocomplete="new-password" required>
+               minlength="12" maxlength="72" placeholder="Mínimo de 12 caracteres" autocomplete="new-password" required>
 
         <button type="submit" class="btn">Instalar agora</button>
     </form>

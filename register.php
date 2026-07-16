@@ -10,97 +10,93 @@ if (is_logged_in()) {
 if (is_post()) {
     require_csrf_token($_POST['csrf_token'] ?? null);
 
-    $nome   = trim((string) ($_POST['nome']   ?? ''));
-    $email  = trim((string) ($_POST['email']  ?? ''));
-    $senha  = (string) ($_POST['senha']  ?? '');
+    $nome = trim((string) ($_POST['nome'] ?? ''));
+    $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+    $senha = (string) ($_POST['senha'] ?? '');
     $senha2 = (string) ($_POST['senha2'] ?? '');
+    $errors = [];
 
-    $erros = [];
-
-    if ($nome === '') {
-        $erros[] = 'Informe seu nome completo.';
+    if (mb_strlen($nome) < 3 || mb_strlen($nome) > 150) {
+        $errors[] = 'Informe seu nome completo.';
     }
-
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $erros[] = 'Informe um e-mail válido.';
+    if (!email_has_valid_domain($email)) {
+        $errors[] = 'Informe um e-mail válido, de um domínio que possa receber mensagens.';
     }
-
-    if (strlen($senha) < 6) {
-        $erros[] = 'A senha deve ter pelo menos 6 caracteres.';
+    if ($passwordError = password_validation_error($senha)) {
+        $errors[] = $passwordError;
     }
-
     if ($senha !== $senha2) {
-        $erros[] = 'As senhas não coincidem.';
+        $errors[] = 'As senhas não coincidem.';
     }
 
-    if (empty($erros)) {
-        $chk = $pdo->prepare('SELECT id FROM users WHERE email = :email LIMIT 1');
-        $chk->execute([':email' => $email]);
-        if ($chk->fetchColumn()) {
-            $erros[] = 'Este e-mail já está cadastrado.';
+    if (!$errors) {
+        $stmt = $pdo->prepare('SELECT id FROM users WHERE email = :email LIMIT 1');
+        $stmt->execute([':email' => $email]);
+        if ($stmt->fetchColumn()) {
+            $errors[] = 'Não foi possível concluir o cadastro com esses dados.';
         }
     }
 
-    if (empty($erros)) {
-        $ins = $pdo->prepare(
-            'INSERT INTO users (nome, email, senha, role, criado_em)
-             VALUES (:nome, :email, :senha, :role, NOW())'
+    if (!$errors) {
+        $token = bin2hex(random_bytes(32));
+        $stmt = $pdo->prepare(
+            "INSERT INTO users
+             (nome, email, senha, role, status, email_verification_hash, email_verification_expires, criado_em)
+             VALUES (:nome, :email, :senha, 'aluno', 'pendente', :token_hash, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())"
         );
-        $ins->execute([
-            ':nome'  => $nome,
+        $stmt->execute([
+            ':nome' => $nome,
             ':email' => $email,
             ':senha' => password_hash($senha, PASSWORD_DEFAULT),
-            ':role'  => 'aluno',
+            ':token_hash' => hash('sha256', $token),
         ]);
 
-        flash('success', 'Cadastro realizado com sucesso! Faça login para acessar.');
+        if (send_verification_email($email, $nome, $token)) {
+            flash('success', 'Cadastro recebido. Confira seu e-mail e aguarde a aprovação da administração.');
+        } else {
+            flash('success', 'Cadastro recebido. O servidor não enviou a confirmação; a administração poderá validar e aprovar sua conta manualmente.');
+        }
         redirect('login.php');
     }
 
-    $erroJoin = implode(' ', $erros);
-    flash('error', $erroJoin);
+    flash('error', implode(' ', $errors));
     redirect('register.php');
 }
 
 $page_title = 'Criar conta';
 require_once __DIR__ . '/includes/header.php';
 ?>
-<div class="login-page">
-    <div class="login-bg-circle login-bg-circle-1"></div>
-    <div class="login-bg-circle login-bg-circle-2"></div>
-
-    <div class="login-center">
-        <img src="<?= e(url('assets/img/logo fl360.png')) ?>" alt="Logo FL360" class="login-logo-full">
-
-        <div class="login-card">
-            <div class="login-card-body">
-                <h2>Criar conta</h2>
-                <p>Preencha os dados abaixo para se cadastrar.</p>
-
-                <form method="post" class="form-grid">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-
-                    <label for="nome">Nome completo</label>
-                    <input id="nome" type="text" name="nome" required autocomplete="name" placeholder="Seu nome completo">
-
-                    <label for="email">E-mail</label>
-                    <input id="email" type="email" name="email" required autocomplete="email" placeholder="voce@exemplo.com">
-
-                    <label for="senha">Senha</label>
-                    <input id="senha" type="password" name="senha" required autocomplete="new-password" placeholder="Mínimo 6 caracteres">
-
-                    <label for="senha2">Confirmar senha</label>
-                    <input id="senha2" type="password" name="senha2" required autocomplete="new-password" placeholder="Repita a senha">
-
-                    <button type="submit" class="btn btn-primary btn-block">Criar conta</button>
-                </form>
-
-                <p style="margin-top:1.1rem;text-align:center;font-size:.9rem;color:#44596a;">
-                    Já tem conta?
-                    <a href="<?= e(url('login.php')) ?>" style="color:#1593A8;font-weight:600;">Faça login</a>
-                </p>
-            </div>
+<main class="auth-page">
+    <section class="auth-brand" aria-label="Programa Friburgo Líder 360">
+        <img src="<?= e(url('assets/img/logo fl360.png')) ?>" alt="FL360 - Friburgo Líder 360" class="auth-logo">
+        <div>
+            <span class="eyebrow">Formação cidadã</span>
+            <h1>Seu próximo passo começa aqui.</h1>
+            <p>Crie sua conta. Por segurança, o e-mail será confirmado e o acesso será aprovado pela equipe FL360.</p>
         </div>
-    </div>
-</div>
+    </section>
+
+    <section class="auth-form-area">
+        <div class="auth-card">
+            <a class="auth-back" href="<?= e(url('login.php')) ?>">Voltar ao login</a>
+            <span class="eyebrow">Novo aluno</span>
+            <h2>Criar conta</h2>
+            <p>Use um e-mail que você acessa e escolha uma frase-senha exclusiva.</p>
+
+            <form method="post" class="form-grid auth-form" novalidate>
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <label for="nome">Nome completo</label>
+                <input id="nome" type="text" name="nome" maxlength="150" required autocomplete="name" placeholder="Seu nome completo">
+                <label for="email">E-mail</label>
+                <input id="email" type="email" name="email" maxlength="180" required autocomplete="email" placeholder="voce@exemplo.com.br">
+                <label for="senha">Senha</label>
+                <input id="senha" type="password" name="senha" minlength="12" maxlength="72" required autocomplete="new-password" placeholder="Mínimo de 12 caracteres" data-password-strength>
+                <div class="password-strength" data-password-feedback>Use 12 ou mais caracteres. Uma frase longa é mais segura.</div>
+                <label for="senha2">Confirmar senha</label>
+                <input id="senha2" type="password" name="senha2" minlength="12" maxlength="72" required autocomplete="new-password" placeholder="Repita a senha">
+                <button type="submit" class="btn btn-primary btn-block">Enviar cadastro</button>
+            </form>
+        </div>
+    </section>
+</main>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

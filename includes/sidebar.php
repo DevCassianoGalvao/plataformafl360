@@ -31,11 +31,7 @@ $menus = [
         'dashboard' => ['Dashboard', 'admin/dashboard.php', 'home', ''],
         'usuarios' => ['Usuários', 'admin/usuarios.php', 'users', ''],
         'avisos' => ['Avisos', 'admin/avisos.php', 'bell', ''],
-        'modulos' => ['Módulos', 'admin/modulos.php', 'modules', 'secondary'],
-        'aulas' => ['Aulas', 'admin/aulas.php', 'play', 'secondary'],
-        'materiais' => ['Materiais', 'admin/materiais.php', 'file', 'secondary'],
-        'quiz' => ['Quizzes', 'admin/quiz.php', 'quiz', 'secondary'],
-        'migracoes' => ['Atualização', 'admin/migracoes.php', 'settings', 'secondary'],
+        'forum_admin' => ['Moderação do fórum', 'admin/forum.php', 'forum', ''],
         'perfil' => ['Perfil', 'admin/perfil.php', 'profile', ''],
         'logout' => ['Sair', 'logout.php', 'logout', ''],
     ],
@@ -59,14 +55,33 @@ $menus = [
     ],
 ];
 $menu = $menus[$role] ?? $menus['aluno'];
+$pedagogicalMenu = [
+    'modulos' => ['Módulos', 'admin/modulos.php', 'modules'],
+    'aulas' => ['Aulas', 'admin/aulas.php', 'play'],
+    'materiais' => ['Materiais', 'admin/materiais.php', 'file'],
+    'quiz' => ['Quizzes', 'admin/quiz.php', 'quiz'],
+];
 ?>
 <aside class="sidebar" id="mainSidebar">
     <div class="sidebar-brand"><div class="sidebar-logo-wrap"><img src="<?= e(url('assets/img/logo fl360.png')) ?>" alt="FL360" class="sidebar-logo"></div><div><strong>FL360</strong><span><?= $role === 'professor' ? 'Área do professor' : ($role === 'admin' ? 'Administração' : 'Portal do aluno') ?></span></div></div>
     <nav class="sidebar-nav" aria-label="Navegação principal">
         <?php foreach ($menu as $key => [$label, $itemUrl, $icon, $class]): ?>
-            <?php if ($role === 'admin' && $key === 'modulos'): ?><span class="sidebar-section">Gestão pedagógica</span><?php endif; ?>
             <a class="sidebar-link <?= $activePage === $key ? 'active' : '' ?> <?= e($class) ?>" href="<?= e(url($itemUrl)) ?>"><?= nav_icon($icon) ?><span><?= e($label) ?></span><?php if ($key === 'notificacoes' && $unreadNotifications > 0): ?><span class="sidebar-counter"><?= $unreadNotifications ?></span><?php endif; ?></a>
+            <?php if ($role === 'admin' && $key === 'avisos'): ?>
+                <details class="sidebar-nav-group">
+                    <summary><?= nav_icon('settings') ?><span>Gestão pedagógica</span><span class="sidebar-group-chevron">›</span></summary>
+                    <div class="sidebar-nav-group-items">
+                        <?php foreach ($pedagogicalMenu as $pedKey => [$pedLabel, $pedUrl, $pedIcon]): ?>
+                            <a class="sidebar-link <?= $activePage === $pedKey ? 'active' : '' ?> secondary" href="<?= e(url($pedUrl)) ?>"><?= nav_icon($pedIcon) ?><span><?= e($pedLabel) ?></span></a>
+                        <?php endforeach; ?>
+                    </div>
+                </details>
+            <?php endif; ?>
         <?php endforeach; ?>
     </nav>
+    <div class="sidebar-partners" aria-label="Realização e parceiros">
+        <img src="<?= e(url('assets/img/LOGO MAICON - ATUALIZADA.png')) ?>" alt="Maicon Gonçalves">
+        <img src="<?= e(url('assets/img/escola do legislativo.png')) ?>" alt="Escola do Legislativo">
+    </div>
     <div class="sidebar-footer"><span>Programa Friburgo Líder 360</span><small>Formação cidadã</small></div>
 </aside>

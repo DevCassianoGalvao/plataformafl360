@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/db.php';
 
 function url(string $path = ''): string
@@ -75,11 +76,14 @@ function current_user(PDO $pdo): ?array
         return $cachedUser;
     }
 
-    $stmt = $pdo->prepare('SELECT id, nome, email, role, criado_em, foto_perfil FROM users WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare(
+        'SELECT id, nome, email, role, status, email_verificado_em, criado_em, foto_perfil
+         FROM users WHERE id = :id LIMIT 1'
+    );
     $stmt->execute([':id' => (int) $_SESSION['user_id']]);
     $user = $stmt->fetch();
 
-    if (!$user) {
+    if (!$user || ($user['status'] ?? 'ativo') !== 'ativo' || empty($user['email_verificado_em'])) {
         logout_user();
         return null;
     }
@@ -90,7 +94,9 @@ function current_user(PDO $pdo): ?array
 
 function require_login(): void
 {
-    if (!is_logged_in()) {
+    global $pdo;
+
+    if (!is_logged_in() || !($pdo instanceof PDO) || current_user($pdo) === null) {
         flash('error', 'Você precisa entrar para acessar esta página.');
         redirect('login.php');
     }
@@ -170,13 +176,126 @@ function can_manage_module(PDO $pdo, int $moduleId, ?array $user = null): bool
         return true;
     }
 
-    if (($user['role'] ?? '') !== 'professor' || !db_column_exists($pdo, 'modules', 'professor_id')) {
+    if (($user['role'] ?? '') !== 'professor') {
+        return false;
+    }
+
+    if (db_table_exists($pdo, 'module_professors')) {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM module_professors WHERE module_id = :id AND user_id = :professor_id');
+        $stmt->execute([':id' => $moduleId, ':professor_id' => (int) $user['id']]);
+        if (((int) $stmt->fetchColumn()) > 0) {
+            return true;
+        }
+    }
+
+    if (!db_column_exists($pdo, 'modules', 'professor_id')) {
         return false;
     }
 
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM modules WHERE id = :id AND professor_id = :professor_id');
     $stmt->execute([':id' => $moduleId, ':professor_id' => (int) $user['id']]);
     return ((int) $stmt->fetchColumn()) > 0;
+}
+
+function password_validation_error(string $password): ?string
+{
+    if (strlen($password) < 12) {
+        return 'A senha deve ter pelo menos 12 caracteres. Prefira uma frase-senha fácil de lembrar.';
+    }
+
+    if (strlen($password) > 72) {
+        return 'A senha deve ter no máximo 72 caracteres.';
+    }
+
+    $normalized = strtolower(trim($password));
+    $blocked = ['123456789012', 'senha12345678', 'password1234', 'qwerty123456', 'admin12345678'];
+    if (in_array($normalized, $blocked, true)) {
+        return 'Essa senha é muito comum. Escolha uma frase-senha exclusiva.';
+    }
+
+    return null;
+}
+
+function email_has_valid_domain(string $email): bool
+{
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    $domain = substr(strrchr($email, '@') ?: '', 1);
+    if ($domain === '' || !function_exists('checkdnsrr')) {
+        return true;
+    }
+
+    return checkdnsrr($domain, 'MX') || checkdnsrr($domain, 'A');
+}
+
+function absolute_url(string $path): string
+{
+    $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? 'www.maicongoncalves.com.br');
+    return ($https ? 'https://' : 'http://') . $host . url($path);
+}
+
+function send_verification_email(string $email, string $name, string $token): bool
+{
+    $verificationUrl = absolute_url('verificar-email.php?token=' . rawurlencode($token));
+    $subject = 'Confirme seu e-mail - FL360';
+    $message = "Olá, {$name}!\n\nConfirme seu e-mail para concluir seu cadastro no Portal FL360:\n{$verificationUrl}\n\nO link expira em 24 horas. Depois da confirmação, o acesso ainda será analisado pela administração.";
+    $headers = [
+        'From: Portal FL360 <no-reply@maicongoncalves.com.br>',
+        'Content-Type: text/plain; charset=UTF-8',
+    ];
+
+    return @mail($email, $subject, $message, implode("\r\n", $headers));
+}
+
+function login_is_rate_limited(PDO $pdo, string $email, string $ip): bool
+{
+    if (!db_table_exists($pdo, 'login_attempts')) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM login_attempts
+         WHERE sucesso = 0 AND criado_em >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+           AND (email_hash = :email_hash OR ip_hash = :ip_hash)'
+    );
+    $stmt->execute([
+        ':email_hash' => hash('sha256', strtolower(trim($email))),
+        ':ip_hash' => hash('sha256', $ip),
+    ]);
+    return ((int) $stmt->fetchColumn()) >= 8;
+}
+
+function record_login_attempt(PDO $pdo, string $email, string $ip, bool $success): void
+{
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO login_attempts (email_hash, ip_hash, sucesso, criado_em)
+             VALUES (:email_hash, :ip_hash, :sucesso, NOW())'
+        );
+        $stmt->execute([
+            ':email_hash' => hash('sha256', strtolower(trim($email))),
+            ':ip_hash' => hash('sha256', $ip),
+            ':sucesso' => $success ? 1 : 0,
+        ]);
+    } catch (Throwable $exception) {
+        // O controle de tentativas não deve indisponibilizar o login.
+    }
+}
+
+function module_professors(PDO $pdo, int $moduleId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT u.id, u.nome
+         FROM module_professors mp
+         INNER JOIN users u ON u.id = mp.user_id
+         WHERE mp.module_id = :module_id
+         ORDER BY u.nome'
+    );
+    $stmt->execute([':module_id' => $moduleId]);
+    return $stmt->fetchAll();
 }
 
 function flash(string $key, ?string $message = null): ?string
@@ -352,9 +471,65 @@ function ensure_schema_updates(PDO $pdo): void
     $alreadyChecked = true;
 
     try {
+        $roleTypeStmt = $pdo->prepare(
+            'SELECT COLUMN_TYPE FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = :table AND column_name = :column'
+        );
+        $roleTypeStmt->execute([':table' => 'users', ':column' => 'role']);
+        $roleType = (string) ($roleTypeStmt->fetchColumn() ?: '');
+        if ($roleType !== '' && !str_contains($roleType, "'professor'")) {
+            $pdo->exec("ALTER TABLE users MODIFY role ENUM('admin','professor','aluno') NOT NULL DEFAULT 'aluno'");
+        }
+
         if (!db_column_exists($pdo, 'users', 'foto_perfil')) {
             $pdo->exec('ALTER TABLE users ADD COLUMN foto_perfil VARCHAR(255) NULL AFTER email');
         }
+
+        if (!db_column_exists($pdo, 'users', 'status')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN status ENUM('pendente','ativo','rejeitado') NOT NULL DEFAULT 'ativo' AFTER role");
+        }
+        if (!db_column_exists($pdo, 'users', 'email_verificado_em')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN email_verificado_em DATETIME NULL AFTER status');
+            $pdo->exec("UPDATE users SET email_verificado_em = COALESCE(criado_em, NOW()) WHERE email_verificado_em IS NULL");
+        }
+        if (!db_column_exists($pdo, 'users', 'email_verification_hash')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN email_verification_hash CHAR(64) NULL AFTER email_verificado_em');
+        }
+        if (!db_column_exists($pdo, 'users', 'email_verification_expires')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN email_verification_expires DATETIME NULL AFTER email_verification_hash');
+        }
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS module_professors (
+                module_id INT UNSIGNED NOT NULL,
+                user_id INT UNSIGNED NOT NULL,
+                assigned_by INT UNSIGNED NULL,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (module_id, user_id),
+                KEY idx_module_professors_user (user_id),
+                CONSTRAINT fk_module_professors_module FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT fk_module_professors_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT fk_module_professors_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        if (db_column_exists($pdo, 'modules', 'professor_id')) {
+            $pdo->exec(
+                'INSERT IGNORE INTO module_professors (module_id, user_id, assigned_by)
+                 SELECT id, professor_id, professor_id FROM modules WHERE professor_id IS NOT NULL'
+            );
+        }
+
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS login_attempts (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                email_hash CHAR(64) NOT NULL,
+                ip_hash CHAR(64) NOT NULL,
+                sucesso TINYINT(1) NOT NULL DEFAULT 0,
+                criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_login_attempts_email_data (email_hash, criado_em),
+                KEY idx_login_attempts_ip_data (ip_hash, criado_em)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
 
         progress_table_name($pdo);
 
@@ -401,6 +576,12 @@ function ensure_schema_updates(PDO $pdo): void
                     ON DELETE CASCADE ON UPDATE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        if (!db_column_exists($pdo, 'forum_topics', 'fixado')) {
+            $pdo->exec('ALTER TABLE forum_topics ADD COLUMN fixado TINYINT(1) NOT NULL DEFAULT 0 AFTER mensagem');
+        }
+        if (!db_column_exists($pdo, 'forum_topics', 'bloqueado')) {
+            $pdo->exec('ALTER TABLE forum_topics ADD COLUMN bloqueado TINYINT(1) NOT NULL DEFAULT 0 AFTER fixado');
+        }
 
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS forum_replies (
@@ -431,6 +612,9 @@ function ensure_schema_updates(PDO $pdo): void
                     ON DELETE CASCADE ON UPDATE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        if (!db_column_exists($pdo, 'quizzes', 'liberacao')) {
+            $pdo->exec("ALTER TABLE quizzes ADD COLUMN liberacao ENUM('sempre','apos_aulas') NOT NULL DEFAULT 'apos_aulas' AFTER descricao");
+        }
 
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS quiz_questions (
@@ -539,39 +723,6 @@ function mark_all_notifications_read(PDO $pdo, int $userId): void
          WHERE nr.id IS NULL'
     );
     $stmt->execute([':user_id_insert' => $userId, ':user_id_join' => $userId]);
-}
-
-function ensure_default_admin(PDO $pdo): void
-{
-    static $bootstrapped = false;
-    if ($bootstrapped) {
-        return;
-    }
-
-    $bootstrapped = true;
-
-    try {
-        $stmt = $pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
-        $hasAdmin = (bool) $stmt->fetch();
-
-        if ($hasAdmin) {
-            return;
-        }
-
-        $insert = $pdo->prepare(
-            'INSERT INTO users (nome, email, senha, role, criado_em)
-             VALUES (:nome, :email, :senha, :role, NOW())'
-        );
-
-        $insert->execute([
-            ':nome' => 'Administrador FL360',
-            ':email' => 'admin@fl360.local',
-            ':senha' => password_hash('33222', PASSWORD_DEFAULT),
-            ':role' => 'admin',
-        ]);
-    } catch (Throwable $exception) {
-        // Ignora erros durante bootstrap.
-    }
 }
 
 ensure_schema_updates($pdo);

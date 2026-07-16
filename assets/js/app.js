@@ -65,6 +65,28 @@
         });
     });
 
+    document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var input = document.getElementById(button.getAttribute('data-copy-target'));
+            if (!input) return;
+            navigator.clipboard.writeText(input.value).then(function () {
+                var original = button.textContent;
+                button.textContent = 'Copiado';
+                setTimeout(function () { button.textContent = original; }, 1800);
+            });
+        });
+    });
+
+    document.querySelectorAll('[data-password-strength]').forEach(function (input) {
+        var feedback = document.querySelector('[data-password-feedback]');
+        if (!feedback) return;
+        input.addEventListener('input', function () {
+            var length = input.value.length;
+            feedback.className = 'password-strength ' + (length >= 16 ? 'is-strong' : (length >= 12 ? 'is-good' : 'is-weak'));
+            feedback.textContent = length >= 16 ? 'Senha forte.' : (length >= 12 ? 'Boa senha. Mais comprimento aumenta a proteção.' : 'Use pelo menos 12 caracteres.');
+        });
+    });
+
     var materialTarget = document.getElementById('materialTarget');
     if (materialTarget) {
         var moduleTarget = document.querySelector('[data-module-target]');

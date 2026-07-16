@@ -16,7 +16,7 @@ Esta versão preserva os dados existentes. Ela altera somente a estrutura necess
 3. Clique em **Update from Remote**.
 4. Clique em **Update from Remote** novamente para confirmar.
 5. Acesse `https://maicongoncalves.com.br/plataformafl360/` e entre como administrador.
-6. No menu, abra **Atualização**.
+6. Acesse diretamente `/admin/migracoes.php` apenas durante uma manutenção orientada.
 7. Clique em **Executar atualização** uma única vez.
 
 ## Configurar professores

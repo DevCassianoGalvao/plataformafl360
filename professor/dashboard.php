@@ -6,7 +6,7 @@ require_professor();
 
 $user = current_user($pdo);
 $userId = (int) $user['id'];
-$schemaReady = db_column_exists($pdo, 'modules', 'professor_id')
+$schemaReady = db_table_exists($pdo, 'module_professors')
     && db_column_exists($pdo, 'materials', 'module_id');
 
 $moduleCount = 0;
@@ -15,24 +15,24 @@ $materialCount = 0;
 $quizCount = 0;
 
 if ($schemaReady) {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM modules WHERE professor_id = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM module_professors WHERE user_id = :id');
     $stmt->execute([':id' => $userId]);
     $moduleCount = (int) $stmt->fetchColumn();
 
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM lessons l INNER JOIN modules m ON m.id = l.module_id WHERE m.professor_id = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM lessons l INNER JOIN module_professors mp ON mp.module_id = l.module_id WHERE mp.user_id = :id');
     $stmt->execute([':id' => $userId]);
     $lessonCount = (int) $stmt->fetchColumn();
 
     $stmt = $pdo->prepare(
         'SELECT COUNT(*) FROM materials mat
          LEFT JOIN lessons l ON l.id = mat.lesson_id
-         INNER JOIN modules m ON m.id = COALESCE(mat.module_id, l.module_id)
-         WHERE m.professor_id = :id'
+         INNER JOIN module_professors mp ON mp.module_id = COALESCE(mat.module_id, l.module_id)
+         WHERE mp.user_id = :id'
     );
     $stmt->execute([':id' => $userId]);
     $materialCount = (int) $stmt->fetchColumn();
 
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM quizzes q INNER JOIN modules m ON m.id = q.module_id WHERE m.professor_id = :id');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM quizzes q INNER JOIN module_professors mp ON mp.module_id = q.module_id WHERE mp.user_id = :id');
     $stmt->execute([':id' => $userId]);
     $quizCount = (int) $stmt->fetchColumn();
 }

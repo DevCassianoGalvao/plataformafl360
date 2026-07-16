@@ -79,13 +79,14 @@ if ($isAdmin) {
          FROM lessons l INNER JOIN modules m ON m.id = l.module_id ORDER BY m.ordem, l.ordem, l.id'
     )->fetchAll();
 } else {
-    $stmt = $pdo->prepare('SELECT id, titulo FROM modules WHERE professor_id = :id ORDER BY ordem, id');
+    $stmt = $pdo->prepare('SELECT m.id, m.titulo FROM modules m INNER JOIN module_professors mp ON mp.module_id = m.id WHERE mp.user_id = :id ORDER BY m.ordem, m.id');
     $stmt->execute([':id' => $managerId]);
     $modules = $stmt->fetchAll();
     $stmt = $pdo->prepare(
         'SELECT l.id, l.module_id, l.titulo, l.descricao, l.video_url, l.ordem, m.titulo AS modulo_titulo
          FROM lessons l INNER JOIN modules m ON m.id = l.module_id
-         WHERE m.professor_id = :id ORDER BY m.ordem, l.ordem, l.id'
+         INNER JOIN module_professors mp ON mp.module_id = m.id
+         WHERE mp.user_id = :id ORDER BY m.ordem, l.ordem, l.id'
     );
     $stmt->execute([':id' => $managerId]);
     $lessons = $stmt->fetchAll();

@@ -21,14 +21,15 @@ if (is_post()) {
         $mId      = (int)    ($_POST['module_id'] ?? 0);
         $titulo   = trim((string) ($_POST['titulo']   ?? ''));
         $descricao = trim((string) ($_POST['descricao'] ?? ''));
+        $liberacao = in_array(($_POST['liberacao'] ?? ''), ['sempre', 'apos_aulas'], true) ? (string) $_POST['liberacao'] : 'apos_aulas';
 
         if (!can_manage_module($pdo, $mId, $manager) || $titulo === '') {
             flash('error', 'Título do quiz é obrigatório.');
             redirect($quizPath . '?module_id=' . $mId);
         }
 
-        $pdo->prepare('INSERT INTO quizzes (module_id, titulo, descricao) VALUES (:m, :t, :d)')
-            ->execute([':m' => $mId, ':t' => $titulo, ':d' => $descricao]);
+        $pdo->prepare('INSERT INTO quizzes (module_id, titulo, descricao, liberacao) VALUES (:m, :t, :d, :l)')
+            ->execute([':m' => $mId, ':t' => $titulo, ':d' => $descricao, ':l' => $liberacao]);
 
         flash('success', 'Quiz criado com sucesso.');
         redirect($quizPath . '?module_id=' . $mId);
@@ -38,6 +39,7 @@ if (is_post()) {
         $quizId   = (int)    ($_POST['quiz_id']   ?? 0);
         $titulo   = trim((string) ($_POST['titulo']   ?? ''));
         $descricao = trim((string) ($_POST['descricao'] ?? ''));
+        $liberacao = in_array(($_POST['liberacao'] ?? ''), ['sempre', 'apos_aulas'], true) ? (string) $_POST['liberacao'] : 'apos_aulas';
 
         $stmt = $pdo->prepare('SELECT module_id FROM quizzes WHERE id = :id LIMIT 1');
         $stmt->execute([':id' => $quizId]);
@@ -53,8 +55,8 @@ if (is_post()) {
             redirect($quizPath);
         }
 
-        $pdo->prepare('UPDATE quizzes SET titulo = :t, descricao = :d WHERE id = :id')
-            ->execute([':t' => $titulo, ':d' => $descricao, ':id' => $quizId]);
+        $pdo->prepare('UPDATE quizzes SET titulo = :t, descricao = :d, liberacao = :l WHERE id = :id')
+            ->execute([':t' => $titulo, ':d' => $descricao, ':l' => $liberacao, ':id' => $quizId]);
 
         flash('success', 'Quiz atualizado.');
         redirect($quizPath . '?module_id=' . $mId);
@@ -168,7 +170,7 @@ if ($moduleId > 0) {
         redirect($quizPath);
     }
 
-    $quizStmt = $pdo->prepare('SELECT id, titulo, descricao FROM quizzes WHERE module_id = :mid LIMIT 1');
+    $quizStmt = $pdo->prepare('SELECT id, titulo, descricao, liberacao FROM quizzes WHERE module_id = :mid LIMIT 1');
     $quizStmt->execute([':mid' => $moduleId]);
     $quiz = $quizStmt->fetch() ?: null;
 
@@ -254,6 +256,9 @@ if ($moduleId > 0) {
                         <label for="descricao">Descrição (opcional)</label>
                         <textarea id="descricao" name="descricao" rows="2"></textarea>
 
+                        <label for="liberacao">Quando liberar para o aluno?</label>
+                        <select id="liberacao" name="liberacao"><option value="apos_aulas">Após concluir todas as aulas</option><option value="sempre">Sempre disponível</option></select>
+
                         <button type="submit" class="btn btn-primary">Criar quiz</button>
                     </form>
                 </section>
@@ -279,6 +284,9 @@ if ($moduleId > 0) {
 
                         <label for="edit_descricao">Descrição</label>
                         <textarea id="edit_descricao" name="descricao" rows="2"><?= e($quiz['descricao'] ?? '') ?></textarea>
+
+                        <label for="edit_liberacao">Quando liberar para o aluno?</label>
+                        <select id="edit_liberacao" name="liberacao"><option value="apos_aulas" <?= $quiz['liberacao'] === 'apos_aulas' ? 'selected' : '' ?>>Após concluir todas as aulas</option><option value="sempre" <?= $quiz['liberacao'] === 'sempre' ? 'selected' : '' ?>>Sempre disponível</option></select>
 
                         <button type="submit" class="btn btn-primary">Salvar alterações</button>
                     </form>
@@ -433,7 +441,7 @@ if ($moduleId > 0) {
          LEFT JOIN quizzes q ON q.module_id = m.id';
     $modulesParams = [];
     if (!$isAdmin) {
-        $modulesSql .= ' WHERE m.professor_id = :professor_id';
+        $modulesSql .= ' INNER JOIN module_professors mp ON mp.module_id = m.id WHERE mp.user_id = :professor_id';
         $modulesParams[':professor_id'] = $managerId;
     }
     $modulesSql .= ' ORDER BY m.ordem ASC, m.id ASC';

@@ -80,9 +80,7 @@ try {
 URL:
 `https://maicongoncalves.com.br/plataformafl360/login.php`
 
-Acesso inicial:
-- E-mail: `admin@fl360.local`
-- Senha: `33222`
+Use o e-mail e a senha segura definidos por você no `install.php`. O sistema não possui credenciais padrão.
 
 ## 8) Checklist final (rápido)
 1. Login funciona.

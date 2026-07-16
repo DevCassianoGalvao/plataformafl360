@@ -7,104 +7,27 @@ require_student();
 $user = current_user($pdo);
 $userId = (int) $user['id'];
 $progressTable = progress_table_name($pdo);
-
 $totalLessons = (int) $pdo->query('SELECT COUNT(*) FROM lessons')->fetchColumn();
-
-$stmtCompleted = $pdo->prepare("SELECT COUNT(*) FROM {$progressTable} WHERE user_id = :user_id AND completed = 1");
-$stmtCompleted->execute([':user_id' => $userId]);
-$completedLessons = (int) $stmtCompleted->fetchColumn();
-
-$overallProgress = $totalLessons > 0 ? (int) round(($completedLessons / $totalLessons) * 100) : 0;
-
-$latestLessonsStmt = $pdo->query(
-    'SELECT l.id, l.titulo, l.descricao, m.titulo AS modulo_titulo
-     FROM lessons l
-     INNER JOIN modules m ON m.id = l.module_id
-     ORDER BY l.id DESC
-     LIMIT 6'
-);
-$latestLessons = $latestLessonsStmt->fetchAll();
-
-$announcementsStmt = $pdo->query(
-    'SELECT id, titulo, mensagem, data
-     FROM announcements
-     ORDER BY data DESC
-     LIMIT 5'
-);
-$announcements = $announcementsStmt->fetchAll();
+$stmt = $pdo->prepare("SELECT COUNT(DISTINCT lesson_id) FROM {$progressTable} WHERE user_id = :user_id AND completed = 1");
+$stmt->execute([':user_id' => $userId]);
+$completedLessons = (int) $stmt->fetchColumn();
+$overallProgress = $totalLessons ? (int) round(($completedLessons / $totalLessons) * 100) : 0;
+$latestLessons = $pdo->query('SELECT l.id, l.titulo, m.titulo AS modulo_titulo FROM lessons l INNER JOIN modules m ON m.id = l.module_id ORDER BY l.id DESC LIMIT 3')->fetchAll();
+$announcements = $pdo->query('SELECT id, titulo, mensagem, data FROM announcements ORDER BY data DESC LIMIT 2')->fetchAll();
 
 $active_page = 'dashboard';
-$page_title = 'Dashboard do Aluno';
+$page_title = 'Início';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <div class="app-layout">
     <?php require_once __DIR__ . '/../includes/sidebar.php'; ?>
-
-    <main class="content-area">
-        <section class="hero-card dashboard-hero">
-            <div><span class="eyebrow">Sua jornada</span><h1>Bem-vindo, <?= e($user['nome']) ?>!</h1>
-            <p>Continue sua formação cidadã e avance no seu ritmo.</p></div>
-            <a class="btn btn-primary" href="<?= e(url('pages/modulos.php')) ?>">Continuar estudando</a>
-        </section>
-
-        <section class="stats-grid">
-            <article class="stat-card">
-                <h3>Progresso total</h3>
-                <strong><?= e((string) $overallProgress) ?>%</strong>
-                <div class="progress-bar"><span style="width: <?= e((string) $overallProgress) ?>%"></span></div>
-            </article>
-
-            <article class="stat-card">
-                <h3>Aulas concluídas</h3>
-                <strong><?= e((string) $completedLessons) ?></strong>
-                <small>de <?= e((string) $totalLessons) ?> aulas</small>
-            </article>
-
-            <article class="stat-card">
-                <h3>Novidades</h3>
-                <strong><?= e((string) notification_unread_count($pdo, $userId)) ?></strong>
-                <small>não lidas</small>
-            </article>
-        </section>
-
-        <section class="panel">
-            <div class="panel-header">
-                <h2>Avisos do programa</h2>
-            </div>
-            <div class="notice-list">
-                <?php if (!$announcements): ?>
-                    <p>Sem avisos no momento.</p>
-                <?php else: ?>
-                    <?php foreach ($announcements as $notice): ?>
-                        <article class="notice-item">
-                            <h3><?= e($notice['titulo']) ?></h3>
-                            <small><?= e(date('d/m/Y H:i', strtotime((string) $notice['data']))) ?></small>
-                            <p><?= nl2br(e($notice['mensagem'])) ?></p>
-                        </article>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
-        </section>
-
-        <section class="panel">
-            <div class="panel-header">
-                <h2>Últimas aulas liberadas</h2>
-                <a href="<?= e(url('pages/modulos.php')) ?>" class="btn btn-ghost">Ver módulos</a>
-            </div>
-            <div class="lesson-list">
-                <?php if (!$latestLessons): ?>
-                    <p>Nenhuma aula cadastrada ainda.</p>
-                <?php else: ?>
-                    <?php foreach ($latestLessons as $lesson): ?>
-                        <a class="lesson-item" href="<?= e(url('pages/aula.php?id=' . (int) $lesson['id'])) ?>">
-                            <strong><?= e($lesson['titulo']) ?></strong>
-                            <span><?= e($lesson['modulo_titulo']) ?></span>
-                            <p><?= e($lesson['descricao']) ?></p>
-                        </a>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
-        </section>
+    <main class="content-area student-dashboard">
+        <section class="hero-card dashboard-hero compact-hero"><div><span class="eyebrow">Sua jornada</span><h1>Olá, <?= e(explode(' ', trim($user['nome']))[0]) ?>.</h1><p>Continue de onde parou e avance no seu ritmo.</p></div><a class="btn btn-primary" href="<?= e(url('pages/modulos.php')) ?>">Continuar estudando</a></section>
+        <section class="progress-strip"><div><span>Progresso geral</span><strong><?= $overallProgress ?>%</strong></div><div class="progress-bar"><span style="width: <?= $overallProgress ?>%"></span></div><small><?= $completedLessons ?> de <?= $totalLessons ?> aulas concluídas</small></section>
+        <div class="dashboard-summary-grid">
+            <section class="panel compact-panel"><div class="panel-header"><div><span class="eyebrow">Comunicados</span><h2>Avisos recentes</h2></div><a class="text-link" href="<?= e(url('pages/notificacoes.php')) ?>">Ver notificações</a></div><div class="compact-feed"><?php if (!$announcements): ?><p>Sem avisos no momento.</p><?php endif; ?><?php foreach ($announcements as $notice): ?><a href="<?= e(url('pages/notificacoes.php')) ?>"><div><strong><?= e($notice['titulo']) ?></strong><p><?= e(mb_strimwidth(strip_tags($notice['mensagem']), 0, 90, '...')) ?></p></div><time><?= e(date('d/m', strtotime($notice['data']))) ?></time></a><?php endforeach; ?></div></section>
+            <section class="panel compact-panel"><div class="panel-header"><div><span class="eyebrow">Continue aprendendo</span><h2>Últimas aulas</h2></div><a class="text-link" href="<?= e(url('pages/modulos.php')) ?>">Ver módulos</a></div><div class="compact-feed"><?php if (!$latestLessons): ?><p>Nenhuma aula publicada.</p><?php endif; ?><?php foreach ($latestLessons as $lesson): ?><a href="<?= e(url('pages/aula.php?id=' . (int) $lesson['id'])) ?>"><div><strong><?= e($lesson['titulo']) ?></strong><p><?= e($lesson['modulo_titulo']) ?></p></div><span>Assistir →</span></a><?php endforeach; ?></div></section>
+        </div>
     </main>
 </div>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

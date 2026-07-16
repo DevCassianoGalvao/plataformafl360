@@ -2,19 +2,26 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_student();
+require_login();
 
 $user = current_user($pdo);
 $userId = (int) $user['id'];
 $topicId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$forumBackPath = current_role() === 'admin' ? 'admin/forum.php' : 'pages/forum.php';
 
 if ($topicId <= 0) {
     flash('error', 'Tópico inválido.');
-    redirect('pages/forum.php');
+    redirect($forumBackPath);
 }
 
 if (is_post()) {
     require_csrf_token($_POST['csrf_token'] ?? null);
+    $lockStmt = $pdo->prepare('SELECT bloqueado FROM forum_topics WHERE id = :id LIMIT 1');
+    $lockStmt->execute([':id' => $topicId]);
+    if ((int) ($lockStmt->fetchColumn() ?: 0) === 1) {
+        flash('error', 'Este tópico está bloqueado para novas respostas.');
+        redirect('pages/topico.php?id=' . $topicId);
+    }
     $mensagem = trim((string) ($_POST['mensagem'] ?? ''));
 
     if ($mensagem === '') {
@@ -47,7 +54,7 @@ if (is_post()) {
 }
 
 $topicStmt = $pdo->prepare(
-    'SELECT t.id, t.titulo, t.mensagem, t.criado_em, u.nome
+    'SELECT t.id, t.titulo, t.mensagem, t.bloqueado, t.criado_em, u.nome
      FROM forum_topics t
      INNER JOIN users u ON u.id = t.user_id
      WHERE t.id = :id
@@ -58,7 +65,7 @@ $topic = $topicStmt->fetch();
 
 if (!$topic) {
     flash('error', 'Tópico não encontrado.');
-    redirect('pages/forum.php');
+    redirect($forumBackPath);
 }
 
 $repliesStmt = $pdo->prepare(
@@ -71,7 +78,7 @@ $repliesStmt = $pdo->prepare(
 $repliesStmt->execute([':topic_id' => $topicId]);
 $replies = $repliesStmt->fetchAll();
 
-$active_page = 'forum';
+$active_page = current_role() === 'admin' ? 'forum_admin' : 'forum';
 $page_title = 'Tópico do Fórum';
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -82,7 +89,7 @@ require_once __DIR__ . '/../includes/header.php';
         <section class="panel">
             <div class="panel-header">
                 <h1><?= e($topic['titulo']) ?></h1>
-                <a class="btn btn-ghost" href="<?= e(url('pages/forum.php')) ?>">Voltar ao fórum</a>
+                <a class="btn btn-ghost" href="<?= e(url($forumBackPath)) ?>">Voltar ao fórum</a>
             </div>
 
             <article class="notice-item">
@@ -109,12 +116,14 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php endif; ?>
             </div>
 
-            <form method="post" class="form-grid">
+            <?php if ($topic['bloqueado']): ?>
+                <div class="empty-state compact-empty"><strong>Discussão encerrada</strong><p>Este tópico está disponível apenas para leitura.</p></div>
+            <?php else: ?><form method="post" class="form-grid">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <label for="mensagem">Sua resposta</label>
                 <textarea id="mensagem" name="mensagem" rows="4" required></textarea>
                 <button type="submit" class="btn btn-primary">Responder</button>
-            </form>
+            </form><?php endif; ?>
         </section>
     </main>
 </div>

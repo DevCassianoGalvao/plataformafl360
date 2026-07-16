@@ -38,14 +38,14 @@ if (is_post()) {
 }
 
 $topicsStmt = $pdo->query(
-    'SELECT t.id, t.titulo, t.mensagem, t.criado_em, t.atualizado_em,
+    'SELECT t.id, t.titulo, t.mensagem, t.fixado, t.bloqueado, t.criado_em, t.atualizado_em,
             u.nome,
             COUNT(r.id) AS total_respostas
      FROM forum_topics t
      INNER JOIN users u ON u.id = t.user_id
      LEFT JOIN forum_replies r ON r.topic_id = t.id
-     GROUP BY t.id, t.titulo, t.mensagem, t.criado_em, t.atualizado_em, u.nome
-     ORDER BY t.atualizado_em DESC'
+     GROUP BY t.id, t.titulo, t.mensagem, t.fixado, t.bloqueado, t.criado_em, t.atualizado_em, u.nome
+     ORDER BY t.fixado DESC, t.atualizado_em DESC'
 );
 $topics = $topicsStmt->fetchAll();
 
@@ -87,6 +87,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php else: ?>
                     <?php foreach ($topics as $topic): ?>
                         <a class="forum-topic-item" href="<?= e(url('pages/topico.php?id=' . (int) $topic['id'])) ?>">
+                            <span class="inline-form wrap"><?php if ($topic['fixado']): ?><span class="badge badge-success">Fixado</span><?php endif; ?><?php if ($topic['bloqueado']): ?><span class="badge badge-warning">Somente leitura</span><?php endif; ?></span>
                             <strong><?= e($topic['titulo']) ?></strong>
                             <span>Por <?= e($topic['nome']) ?> em <?= e(date('d/m/Y H:i', strtotime((string) $topic['criado_em']))) ?></span>
                             <p><?= e($topic['mensagem']) ?></p>

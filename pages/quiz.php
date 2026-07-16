@@ -24,13 +24,18 @@ if (!$module) {
     redirect('pages/modulos.php');
 }
 
-$quizStmt = $pdo->prepare('SELECT id, titulo, descricao FROM quizzes WHERE module_id = :mid LIMIT 1');
+$quizStmt = $pdo->prepare('SELECT id, titulo, descricao, liberacao FROM quizzes WHERE module_id = :mid LIMIT 1');
 $quizStmt->execute([':mid' => $moduleId]);
 $quiz = $quizStmt->fetch();
 
 if (!$quiz) {
     flash('error', 'Este módulo não possui quiz.');
-    redirect('pages/modulos.php');
+    redirect('pages/modulo.php?id=' . $moduleId);
+}
+
+if ($quiz['liberacao'] === 'apos_aulas' && module_progress_percent($pdo, $userId, $moduleId) < 100) {
+    flash('error', 'Conclua todas as aulas do módulo para liberar o quiz.');
+    redirect('pages/modulo.php?id=' . $moduleId);
 }
 
 $quizId = (int) $quiz['id'];
@@ -44,7 +49,7 @@ $questions = $qsStmt->fetchAll();
 
 if (!$questions) {
     flash('error', 'Este quiz ainda não possui perguntas.');
-    redirect('pages/modulos.php');
+    redirect('pages/modulo.php?id=' . $moduleId);
 }
 
 foreach ($questions as &$question) {

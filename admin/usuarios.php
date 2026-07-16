@@ -5,209 +5,156 @@ require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
 $currentAdminId = (int) ($_SESSION['user_id'] ?? 0);
+$returnPath = 'admin/usuarios.php';
 
 if (is_post()) {
     require_csrf_token($_POST['csrf_token'] ?? null);
     $action = (string) ($_POST['action'] ?? '');
+    $id = (int) ($_POST['id'] ?? 0);
 
-    if ($action === 'create') {
-        $nome = trim((string) ($_POST['nome'] ?? ''));
-        $email = trim((string) ($_POST['email'] ?? ''));
-        $senha = (string) ($_POST['senha'] ?? '');
-        $role = (string) ($_POST['role'] ?? 'aluno');
-
-        if ($nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || $senha === '' || !in_array($role, ['admin', 'professor', 'aluno'], true)) {
-            flash('error', 'Dados invalidos para criar usuario.');
-            redirect('admin/usuarios.php');
+    if ($action === 'approve' || $action === 'reject' || $action === 'verify') {
+        if ($id <= 0) {
+            flash('error', 'Usuário inválido.');
+            redirect($returnPath);
         }
-
-        try {
-            $stmt = $pdo->prepare(
-                'INSERT INTO users (nome, email, senha, role, criado_em)
-                 VALUES (:nome, :email, :senha, :role, NOW())'
-            );
-            $stmt->execute([
-                ':nome' => $nome,
-                ':email' => $email,
-                ':senha' => password_hash($senha, PASSWORD_DEFAULT),
-                ':role' => $role,
-            ]);
-
-            flash('success', 'Usuario criado com sucesso.');
-        } catch (PDOException $exception) {
-            flash('error', 'Nao foi possivel criar o usuario (email pode ja existir).');
+        if ($action === 'approve') {
+            $pdo->prepare("UPDATE users SET status = 'ativo' WHERE id = :id")->execute([':id' => $id]);
+            flash('success', 'Cadastro aprovado. O usuário poderá entrar após confirmar o e-mail.');
+        } elseif ($action === 'reject') {
+            $pdo->prepare("UPDATE users SET status = 'rejeitado' WHERE id = :id")->execute([':id' => $id]);
+            flash('success', 'Cadastro rejeitado.');
+        } else {
+            $pdo->prepare('UPDATE users SET email_verificado_em = NOW(), email_verification_hash = NULL, email_verification_expires = NULL WHERE id = :id')
+                ->execute([':id' => $id]);
+            flash('success', 'E-mail confirmado manualmente.');
         }
-
-        redirect('admin/usuarios.php');
+        redirect($returnPath);
     }
 
-    if ($action === 'update') {
-        $id = (int) ($_POST['id'] ?? 0);
+    if ($action === 'create' || $action === 'update') {
         $nome = trim((string) ($_POST['nome'] ?? ''));
-        $email = trim((string) ($_POST['email'] ?? ''));
+        $email = strtolower(trim((string) ($_POST['email'] ?? '')));
         $role = (string) ($_POST['role'] ?? 'aluno');
-        $novaSenha = (string) ($_POST['nova_senha'] ?? '');
+        $password = (string) ($_POST[$action === 'create' ? 'senha' : 'nova_senha'] ?? '');
 
-        if ($id <= 0 || $nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || !in_array($role, ['admin', 'professor', 'aluno'], true)) {
-            flash('error', 'Dados invalidos para atualizar usuario.');
-            redirect('admin/usuarios.php');
+        if (mb_strlen($nome) < 3 || !email_has_valid_domain($email) || !in_array($role, ['admin', 'professor', 'aluno'], true)) {
+            flash('error', 'Revise nome, e-mail e tipo de usuário.');
+            redirect($returnPath);
+        }
+        if (($action === 'create' || $password !== '') && ($passwordError = password_validation_error($password))) {
+            flash('error', $passwordError);
+            redirect($returnPath);
+        }
+        if ($action === 'update' && $id === $currentAdminId && $role !== 'admin') {
+            flash('error', 'Você não pode remover seu próprio acesso administrativo.');
+            redirect($returnPath);
         }
 
         try {
-            if ($novaSenha !== '') {
-                $stmt = $pdo->prepare('UPDATE users SET nome = :nome, email = :email, role = :role, senha = :senha WHERE id = :id');
-                $stmt->execute([
-                    ':nome' => $nome,
-                    ':email' => $email,
-                    ':role' => $role,
-                    ':senha' => password_hash($novaSenha, PASSWORD_DEFAULT),
-                    ':id' => $id,
-                ]);
+            if ($action === 'create') {
+                $stmt = $pdo->prepare(
+                    "INSERT INTO users (nome, email, senha, role, status, email_verificado_em, criado_em)
+                     VALUES (:nome, :email, :senha, :role, 'ativo', NOW(), NOW())"
+                );
+                $stmt->execute([':nome' => $nome, ':email' => $email, ':senha' => password_hash($password, PASSWORD_DEFAULT), ':role' => $role]);
+                flash('success', 'Usuário criado e liberado com sucesso.');
             } else {
-                $stmt = $pdo->prepare('UPDATE users SET nome = :nome, email = :email, role = :role WHERE id = :id');
-                $stmt->execute([
-                    ':nome' => $nome,
-                    ':email' => $email,
-                    ':role' => $role,
-                    ':id' => $id,
-                ]);
+                $sql = 'UPDATE users SET nome = :nome, email = :email, role = :role';
+                $params = [':nome' => $nome, ':email' => $email, ':role' => $role, ':id' => $id];
+                if ($password !== '') {
+                    $sql .= ', senha = :senha';
+                    $params[':senha'] = password_hash($password, PASSWORD_DEFAULT);
+                }
+                $sql .= ' WHERE id = :id';
+                $pdo->prepare($sql)->execute($params);
+                flash('success', 'Usuário atualizado.');
             }
-
-            flash('success', 'Usuario atualizado.');
         } catch (PDOException $exception) {
-            flash('error', 'Falha ao atualizar usuario (email duplicado?).');
+            flash('error', 'Não foi possível salvar. Verifique se o e-mail já está cadastrado.');
         }
-
-        redirect('admin/usuarios.php');
+        redirect($returnPath);
     }
 
     if ($action === 'delete') {
-        $id = (int) ($_POST['id'] ?? 0);
-
         if ($id === $currentAdminId) {
-            flash('error', 'Voce nao pode remover o proprio usuario logado.');
-            redirect('admin/usuarios.php');
+            flash('error', 'Você não pode excluir o próprio usuário.');
+            redirect($returnPath);
         }
-
-        $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
-        $stmt->execute([':id' => $id]);
-
-        flash('success', 'Usuario excluido.');
-        redirect('admin/usuarios.php');
+        $pdo->prepare('DELETE FROM users WHERE id = :id')->execute([':id' => $id]);
+        flash('success', 'Usuário excluído.');
+        redirect($returnPath);
     }
 }
 
-$usersStmt = $pdo->query('SELECT id, nome, email, role, criado_em FROM users ORDER BY criado_em DESC');
-$users = $usersStmt->fetchAll();
+$users = $pdo->query(
+    'SELECT id, nome, email, role, status, email_verificado_em, criado_em
+     FROM users ORDER BY (status = \'pendente\') DESC, criado_em DESC'
+)->fetchAll();
+$pendingCount = count(array_filter($users, static fn(array $user): bool => $user['status'] === 'pendente'));
+$registerUrl = absolute_url('register.php');
 
 $active_page = 'usuarios';
-$page_title = 'Gerenciar Usuarios';
+$page_title = 'Gestão de usuários';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <div class="app-layout">
     <?php require_once __DIR__ . '/../includes/sidebar.php'; ?>
-
     <main class="content-area">
-        <section class="panel">
-            <div class="panel-header">
-                <h2>Link de auto-cadastro para alunos</h2>
-            </div>
-            <p style="margin-bottom:.75rem;">Compartilhe este link com seus alunos para que eles se cadastrem diretamente:</p>
-            <?php $registerUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http')
-                . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . url('register.php'); ?>
-            <div class="inline-form wrap" style="gap:.5rem;align-items:center;">
-                <input id="registerLink" type="text" value="<?= e($registerUrl) ?>" readonly
-                       style="flex:1;min-width:260px;" onclick="this.select()">
-                <button type="button" class="btn btn-ghost"
-                        onclick="navigator.clipboard.writeText(document.getElementById('registerLink').value).then(()=>alert('Link copiado!'))">
-                    Copiar link
-                </button>
-            </div>
+        <section class="page-heading">
+            <div><span class="eyebrow">Acessos e segurança</span><h1>Usuários</h1><p>Aprove cadastros externos e gerencie a equipe do portal.</p></div>
+            <?php if ($pendingCount): ?><span class="badge badge-warning"><?= $pendingCount ?> pendente<?= $pendingCount > 1 ? 's' : '' ?></span><?php endif; ?>
         </section>
 
-        <section class="panel">
-            <div class="panel-header">
-                <h1>Novo Usuario</h1>
-            </div>
-            <form method="post" class="form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="create">
+        <section class="panel compact-panel">
+            <div class="panel-header"><h2>Link de cadastro</h2><span class="badge badge-neutral">Requer aprovação</span></div>
+            <div class="copy-field"><input id="registerLink" type="text" value="<?= e($registerUrl) ?>" readonly><button type="button" class="btn btn-ghost" data-copy-target="registerLink">Copiar</button></div>
+        </section>
 
-                <label for="nome">Nome</label>
-                <input id="nome" type="text" name="nome" required>
-
-                <label for="email">Email</label>
-                <input id="email" type="email" name="email" required>
-
-                <label for="senha">Senha</label>
-                <input id="senha" type="password" name="senha" required>
-
-                <label for="role">Tipo de usuario</label>
-                <select id="role" name="role" required>
-                    <option value="aluno">Aluno</option>
-                    <option value="professor">Professor</option>
-                    <option value="admin">Admin</option>
-                </select>
-
-                <button type="submit" class="btn btn-primary">Criar usuario</button>
+        <details class="panel disclosure-panel">
+            <summary><span><strong>Criar usuário manualmente</strong><small>O acesso criado aqui já fica confirmado e ativo.</small></span><span class="disclosure-icon">+</span></summary>
+            <form method="post" class="form-grid form-grid-columns disclosure-content">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="create">
+                <label>Nome completo<input type="text" name="nome" maxlength="150" required></label>
+                <label>E-mail<input type="email" name="email" maxlength="180" required></label>
+                <label>Senha inicial<input type="password" name="senha" minlength="12" maxlength="72" required placeholder="Mínimo de 12 caracteres"></label>
+                <label>Tipo<select name="role" required><option value="aluno">Aluno</option><option value="professor">Professor</option><option value="admin">Administrador</option></select></label>
+                <div class="field-wide"><button class="btn btn-primary" type="submit">Criar usuário</button></div>
             </form>
-        </section>
+        </details>
 
         <section class="panel">
-            <div class="panel-header">
-                <h2>Lista de Usuarios</h2>
-            </div>
-
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Dados</th>
-                        <th>Tipo</th>
-                        <th>Criado em</th>
-                        <th>Acoes</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php if (!$users): ?>
-                        <tr><td colspan="5">Nenhum usuario cadastrado.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($users as $user): ?>
-                            <tr>
-                                <td><?= e((string) $user['id']) ?></td>
-                                <td>
-                                    <form method="post" class="inline-form wrap">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                        <input type="hidden" name="action" value="update">
-                                        <input type="hidden" name="id" value="<?= e((string) $user['id']) ?>">
-
-                                        <input type="text" name="nome" value="<?= e($user['nome']) ?>" required>
-                                        <input type="email" name="email" value="<?= e($user['email']) ?>" required>
-                                        <input type="password" name="nova_senha" placeholder="Nova senha (opcional)">
-                                        <select name="role" required>
-                                            <option value="aluno" <?= $user['role'] === 'aluno' ? 'selected' : '' ?>>Aluno</option>
-                                            <option value="professor" <?= $user['role'] === 'professor' ? 'selected' : '' ?>>Professor</option>
-                                            <option value="admin" <?= $user['role'] === 'admin' ? 'selected' : '' ?>>Admin</option>
-                                        </select>
-                                        <button class="btn btn-primary" type="submit">Salvar</button>
-                                    </form>
-                                </td>
-                                <td><span class="badge badge-neutral"><?= e($user['role']) ?></span></td>
-                                <td><?= e(date('d/m/Y H:i', strtotime((string) $user['criado_em']))) ?></td>
-                                <td>
-                                    <form method="post" onsubmit="return confirm('Deseja realmente excluir este usuario?');">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="id" value="<?= e((string) $user['id']) ?>">
-                                        <button class="btn btn-danger" type="submit">Excluir</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <div class="panel-header"><h2>Cadastros e acessos</h2><span class="badge badge-neutral"><?= count($users) ?> usuários</span></div>
+            <div class="user-admin-grid">
+                <?php foreach ($users as $user): ?>
+                    <article class="user-admin-card <?= $user['status'] === 'pendente' ? 'is-pending' : '' ?>">
+                        <div class="user-admin-head">
+                            <div class="avatar avatar-small"><?= e(mb_strtoupper(mb_substr($user['nome'], 0, 1))) ?></div>
+                            <div><strong><?= e($user['nome']) ?></strong><small><?= e($user['email']) ?></small></div>
+                            <span class="badge badge-neutral"><?= e($user['role']) ?></span>
+                        </div>
+                        <div class="user-status-row">
+                            <span class="badge <?= $user['status'] === 'ativo' ? 'badge-success' : ($user['status'] === 'pendente' ? 'badge-warning' : 'badge-danger') ?>"><?= e($user['status']) ?></span>
+                            <span><?= $user['email_verificado_em'] ? 'E-mail confirmado' : 'E-mail não confirmado' ?></span>
+                        </div>
+                        <?php if ($user['status'] === 'pendente'): ?>
+                            <div class="inline-form wrap">
+                                <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-primary">Aprovar</button></form>
+                                <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="reject"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-danger">Rejeitar</button></form>
+                                <?php if (!$user['email_verificado_em']): ?><form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="verify"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-ghost">Confirmar e-mail</button></form><?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                        <details class="user-edit"><summary>Editar dados</summary>
+                            <form method="post" class="form-grid">
+                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>">
+                                <label>Nome<input type="text" name="nome" value="<?= e($user['nome']) ?>" required></label><label>E-mail<input type="email" name="email" value="<?= e($user['email']) ?>" required></label>
+                                <label>Nova senha<input type="password" name="nova_senha" minlength="12" maxlength="72" placeholder="Deixe em branco para manter"></label>
+                                <label>Tipo<select name="role"><option value="aluno" <?= $user['role'] === 'aluno' ? 'selected' : '' ?>>Aluno</option><option value="professor" <?= $user['role'] === 'professor' ? 'selected' : '' ?>>Professor</option><option value="admin" <?= $user['role'] === 'admin' ? 'selected' : '' ?>>Administrador</option></select></label>
+                                <button class="btn btn-primary">Salvar alterações</button>
+                            </form>
+                            <?php if ((int) $user['id'] !== $currentAdminId): ?><form method="post" onsubmit="return confirm('Excluir este usuário e todos os dados relacionados?');"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-danger">Excluir usuário</button></form><?php endif; ?>
+                        </details>
+                    </article>
+                <?php endforeach; ?>
             </div>
         </section>
     </main>

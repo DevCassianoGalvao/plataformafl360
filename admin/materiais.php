@@ -71,14 +71,14 @@ if (is_post()) {
     }
 }
 
-$moduleSql = 'SELECT id, titulo FROM modules'; $moduleParams = [];
-if (!$isAdmin) { $moduleSql .= ' WHERE professor_id = :professor_id'; $moduleParams[':professor_id'] = $managerId; }
+$moduleSql = 'SELECT m.id, m.titulo FROM modules m'; $moduleParams = [];
+if (!$isAdmin) { $moduleSql .= ' INNER JOIN module_professors mp ON mp.module_id = m.id WHERE mp.user_id = :professor_id'; $moduleParams[':professor_id'] = $managerId; }
 $moduleSql .= ' ORDER BY ordem, id'; $stmt = $pdo->prepare($moduleSql); $stmt->execute($moduleParams); $modules = $stmt->fetchAll();
 $lessonSql = 'SELECT l.id, l.titulo, m.titulo AS modulo_titulo FROM lessons l INNER JOIN modules m ON m.id = l.module_id'; $lessonParams = [];
-if (!$isAdmin) { $lessonSql .= ' WHERE m.professor_id = :professor_id'; $lessonParams[':professor_id'] = $managerId; }
+if (!$isAdmin) { $lessonSql .= ' INNER JOIN module_professors mp ON mp.module_id = m.id WHERE mp.user_id = :professor_id'; $lessonParams[':professor_id'] = $managerId; }
 $lessonSql .= ' ORDER BY m.ordem, l.ordem, l.id'; $stmt = $pdo->prepare($lessonSql); $stmt->execute($lessonParams); $lessons = $stmt->fetchAll();
 $materialSql = 'SELECT mat.id, mat.titulo, mat.arquivo, mat.module_id, mat.lesson_id, l.titulo AS aula_titulo, m.titulo AS modulo_titulo FROM materials mat LEFT JOIN lessons l ON l.id = mat.lesson_id INNER JOIN modules m ON m.id = COALESCE(mat.module_id, l.module_id)'; $materialParams = [];
-if (!$isAdmin) { $materialSql .= ' WHERE m.professor_id = :professor_id'; $materialParams[':professor_id'] = $managerId; }
+if (!$isAdmin) { $materialSql .= ' INNER JOIN module_professors mp ON mp.module_id = m.id WHERE mp.user_id = :professor_id'; $materialParams[':professor_id'] = $managerId; }
 $materialSql .= ' ORDER BY mat.id DESC'; $stmt = $pdo->prepare($materialSql); $stmt->execute($materialParams); $materials = $stmt->fetchAll();
 
 $active_page = 'materiais'; $page_title = 'Materiais'; require_once __DIR__ . '/../includes/header.php';

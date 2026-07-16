@@ -13,9 +13,8 @@
 --     2. Crie o banco: CREATE DATABASE plataformafl360 ...  (ver abaixo)
 --     3. Selecione o banco e importe este arquivo
 --
---   CREDENCIAIS PADRÃO DO ADMIN (criadas automaticamente pelo sistema):
---     E-mail : admin@fl360.local
---     Senha  : 33222   ← troque imediatamente após o primeiro acesso
+--   O administrador inicial é criado pelo instalador (install.php).
+--   Não existem credenciais padrão no código ou neste arquivo SQL.
 -- =========================================================================
 
 SET NAMES utf8mb4;
@@ -42,6 +41,10 @@ CREATE TABLE IF NOT EXISTS users (
     foto_perfil VARCHAR(255) NULL,
     senha       VARCHAR(255) NOT NULL,
     role        ENUM('admin','professor','aluno') NOT NULL DEFAULT 'aluno',
+    status      ENUM('pendente','ativo','rejeitado') NOT NULL DEFAULT 'ativo',
+    email_verificado_em DATETIME NULL,
+    email_verification_hash CHAR(64) NULL,
+    email_verification_expires DATETIME NULL,
     criado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_users_email (email),
     KEY idx_users_role (role)
@@ -58,6 +61,19 @@ CREATE TABLE IF NOT EXISTS modules (
     KEY idx_modules_professor (professor_id),
     CONSTRAINT fk_modules_professor FOREIGN KEY (professor_id) REFERENCES users(id)
         ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Professores colaboradores por módulo.
+CREATE TABLE IF NOT EXISTS module_professors (
+    module_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    assigned_by INT UNSIGNED NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (module_id, user_id),
+    KEY idx_module_professors_user (user_id),
+    CONSTRAINT fk_module_professors_module FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_module_professors_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_module_professors_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── TABELA: lessons ──────────────────────────────────────────────────────
@@ -152,6 +168,8 @@ CREATE TABLE IF NOT EXISTS forum_topics (
     user_id      INT UNSIGNED NOT NULL,
     titulo       VARCHAR(200) NOT NULL,
     mensagem     TEXT NOT NULL,
+    fixado       TINYINT(1) NOT NULL DEFAULT 0,
+    bloqueado    TINYINT(1) NOT NULL DEFAULT 0,
     criado_em    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_forum_topics_atualizado (atualizado_em),
@@ -183,11 +201,22 @@ CREATE TABLE IF NOT EXISTS quizzes (
     module_id INT UNSIGNED NOT NULL,
     titulo    VARCHAR(180) NOT NULL,
     descricao TEXT NULL,
+    liberacao ENUM('sempre','apos_aulas') NOT NULL DEFAULT 'apos_aulas',
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_quizzes_module (module_id),
     CONSTRAINT fk_quizzes_module
         FOREIGN KEY (module_id) REFERENCES modules(id)
         ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email_hash CHAR(64) NOT NULL,
+    ip_hash CHAR(64) NOT NULL,
+    sucesso TINYINT(1) NOT NULL DEFAULT 0,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_login_attempts_email_data (email_hash, criado_em),
+    KEY idx_login_attempts_ip_data (ip_hash, criado_em)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── TABELA: quiz_questions ───────────────────────────────────────────────
@@ -241,7 +270,7 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ─── Dados iniciais de exemplo (opcionais) ────────────────────────────────
--- O usuário admin é criado automaticamente pelo sistema no primeiro acesso.
+-- O usuário admin é criado pelo instalador install.php.
 -- Descomente abaixo para inserir dados de exemplo:
 
 /*
