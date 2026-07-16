@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 
-// ─── Proteção: desabilitar após instalar ──────────────────────────────────
+// ─── Proteção: permite reparo somente se a configuração estiver ausente ──
 $lockFile = __DIR__ . '/storage/installed.lock';
-if (file_exists($lockFile)) {
+$dbPhpPath = __DIR__ . '/includes/db.php';
+$repairMode = file_exists($lockFile) && !file_exists($dbPhpPath);
+
+if (file_exists($lockFile) && !$repairMode) {
     http_response_code(403);
     die('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>FL360</title>
     <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f7282;color:#fff;}
@@ -36,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Validação básica
     if ($dbName === '')    { $errors[] = 'Nome do banco não pode ser vazio.'; }
+    if ($dbName !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $dbName)) { $errors[] = 'Nome do banco contém caracteres inválidos.'; }
     if ($dbUser === '')    { $errors[] = 'Usuário do banco não pode ser vazio.'; }
     if (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) { $errors[] = 'E-mail do admin inválido.'; }
     if (strlen($adminPass) < 6) { $errors[] = 'Senha do admin deve ter pelo menos 6 caracteres.'; }
@@ -296,23 +300,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        // ── Criar lock file e atualizar db.php
+        // ── Criar db.php primeiro; bloquear instalador somente após sucesso
         $storageDir = __DIR__ . '/storage';
         if (!is_dir($storageDir)) { mkdir($storageDir, 0755, true); }
-        file_put_contents($lockFile, date('Y-m-d H:i:s'));
 
-        // Atualizar includes/db.php com as credenciais informadas
-        $dbPhpPath = __DIR__ . '/includes/db.php';
-        if (file_exists($dbPhpPath)) {
-            $content = file_get_contents($dbPhpPath);
-            $content = preg_replace("/\\\$dbHost\s*=.*?;/", "\$dbHost = getenv('DB_HOST') ?: " . var_export($dbHost, true) . ";", $content);
-            $content = preg_replace("/\\\$dbName\s*=.*?;/", "\$dbName = getenv('DB_NAME') ?: " . var_export($dbName, true) . ";", $content);
-            $content = preg_replace("/\\\$dbUser\s*=.*?;/", "\$dbUser = getenv('DB_USER') ?: " . var_export($dbUser, true) . ";", $content);
-            $content = preg_replace("/\\\$dbPass\s*=.*?;/", "\$dbPass = getenv('DB_PASS') ?: " . var_export($dbPass, true) . ";", $content);
-            file_put_contents($dbPhpPath, $content);
+        $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/')));
+        $basePath = ($scriptDir === '/' || $scriptDir === '.') ? '' : rtrim($scriptDir, '/');
+        $config = "<?php\n"
+            . "declare(strict_types=1);\n\n"
+            . "if (session_status() === PHP_SESSION_NONE) {\n    session_start();\n}\n\n"
+            . "date_default_timezone_set('America/Sao_Paulo');\n\n"
+            . "define('APP_NAME', 'Portal do Aluno - FL360');\n"
+            . "define('BASE_PATH', " . var_export($basePath, true) . ");\n\n"
+            . "\$dbHost = getenv('DB_HOST') ?: " . var_export($dbHost, true) . ";\n"
+            . "\$dbName = getenv('DB_NAME') ?: " . var_export($dbName, true) . ";\n"
+            . "\$dbUser = getenv('DB_USER') ?: " . var_export($dbUser, true) . ";\n"
+            . "\$dbPass = getenv('DB_PASS') ?: " . var_export($dbPass, true) . ";\n\n"
+            . "\$dsn = \"mysql:host={\$dbHost};dbname={\$dbName};charset=utf8mb4\";\n"
+            . "\$pdoOptions = [\n"
+            . "    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,\n"
+            . "    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,\n"
+            . "    PDO::ATTR_EMULATE_PREPARES => false,\n"
+            . "];\n\n"
+            . "try {\n    \$pdo = new PDO(\$dsn, \$dbUser, \$dbPass, \$pdoOptions);\n"
+            . "} catch (PDOException \$exception) {\n"
+            . "    http_response_code(500);\n"
+            . "    die('Erro ao conectar com o banco de dados. Verifique o arquivo includes/db.php.');\n"
+            . "}\n";
+
+        $tempConfig = $dbPhpPath . '.tmp';
+        $written = @file_put_contents($tempConfig, $config, LOCK_EX);
+        if ($written === false || !@rename($tempConfig, $dbPhpPath)) {
+            @unlink($tempConfig);
+            $errors[] = 'Não foi possível criar includes/db.php. Verifique as permissões da pasta includes.';
+        } else {
+            @chmod($dbPhpPath, 0640);
+            if (@file_put_contents($lockFile, date('Y-m-d H:i:s'), LOCK_EX) === false) {
+                $errors[] = 'Configuração criada, mas não foi possível bloquear o instalador. Verifique a pasta storage.';
+            }
         }
 
-        $step = 3; // sucesso
+        $step = empty($errors) ? 3 : 2;
     } else {
         $step = 2; // mostrar erros
         // repopular campos
@@ -431,6 +459,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <!-- ──────────────── FORMULÁRIO ──────────────── -->
     <h2>Configurar instalação</h2>
     <p>Preencha as credenciais do banco e defina o administrador. O sistema criará todas as tabelas automaticamente.</p>
+
+    <?php if ($repairMode): ?>
+        <div class="alert alert-error">A configuração do banco está ausente. Preencha os dados novamente para reparar o acesso sem apagar o conteúdo existente.</div>
+    <?php endif; ?>
 
     <?php if (!empty($errors)): ?>
         <?php foreach ($errors as $err): ?>
