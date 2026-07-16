@@ -1,6 +1,6 @@
 ﻿# Portal do Aluno - FL360
 
-Sistema EAD em PHP puro + MySQL com área do aluno e CMS administrativo.
+Sistema EAD em PHP puro + MySQL com áreas de aluno, professor e administração.
 
 ## Stack
 - PHP puro (sem framework)
@@ -18,7 +18,9 @@ Sistema EAD em PHP puro + MySQL com área do aluno e CMS administrativo.
 - Perfil do aluno com foto (upload, troca, exclusão e recorte automático)
 - Notificações com sino no topo, contador e página de novidades
 - Fórum da comunidade (tópicos e respostas)
-- CMS admin para usuários, módulos, aulas, materiais e avisos
+- Painel do professor para módulos próprios, aulas, materiais e quizzes
+- Painel administrativo para usuários, avisos, governança e revisão de conteúdo
+- Materiais vinculados ao módulo inteiro ou a uma aula específica
 - Dark mode em todo o portal
 
 ## Segurança
@@ -40,6 +42,7 @@ Sistema EAD em PHP puro + MySQL com área do aluno e CMS administrativo.
   /pages
     download.php
   /admin
+  /professor
   index.php
   login.php
   logout.php
@@ -54,8 +57,10 @@ Sistema EAD em PHP puro + MySQL com área do aluno e CMS administrativo.
 4. Garanta permissão de escrita em `uploads/`.
 5. Acesse `login.php`.
 
-## Acesso inicial admin
-- E-mail: `admin@fl360.local`
-- Senha: `33222`
+## Atualizar uma instalação existente
 
-O admin inicial é criado automaticamente apenas se não existir nenhum administrador no banco.
+Siga [ATUALIZACAO_CPANEL.md](ATUALIZACAO_CPANEL.md). A atualização preserva usuários, módulos, aulas, progresso, materiais e avisos existentes.
+
+## Administrador inicial
+
+Em uma instalação nova, a conta é definida no `install.php`. Não existe mais senha administrativa padrão criada automaticamente.

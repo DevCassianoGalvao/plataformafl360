@@ -65,6 +65,21 @@
         });
     });
 
+    var materialTarget = document.getElementById('materialTarget');
+    if (materialTarget) {
+        var moduleTarget = document.querySelector('[data-module-target]');
+        var lessonTarget = document.querySelector('[data-lesson-target]');
+        var syncMaterialTarget = function () {
+            var lessonMode = materialTarget.value === 'lesson';
+            moduleTarget.hidden = lessonMode;
+            lessonTarget.hidden = !lessonMode;
+            moduleTarget.querySelector('select').disabled = lessonMode;
+            lessonTarget.querySelector('select').disabled = !lessonMode;
+        };
+        materialTarget.addEventListener('change', syncMaterialTarget);
+        syncMaterialTarget();
+    }
+
     setTimeout(function () {
         document.querySelectorAll('.flash').forEach(function (item) {
             item.style.transition = 'opacity .3s ease';

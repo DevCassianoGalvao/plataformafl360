@@ -2,7 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_admin();
+require_content_manager();
+
+$manager = current_user($pdo);
+$managerId = (int) $manager['id'];
+$isAdmin = $manager['role'] === 'admin';
+$quizPath = content_manager_path('quiz.php');
 
 $moduleId      = isset($_GET['module_id'])    ? (int) $_GET['module_id']    : 0;
 $editQuestionId = isset($_GET['edit_question']) ? (int) $_GET['edit_question'] : 0;
@@ -17,16 +22,16 @@ if (is_post()) {
         $titulo   = trim((string) ($_POST['titulo']   ?? ''));
         $descricao = trim((string) ($_POST['descricao'] ?? ''));
 
-        if ($mId <= 0 || $titulo === '') {
+        if (!can_manage_module($pdo, $mId, $manager) || $titulo === '') {
             flash('error', 'Título do quiz é obrigatório.');
-            redirect('admin/quiz.php?module_id=' . $mId);
+            redirect($quizPath . '?module_id=' . $mId);
         }
 
         $pdo->prepare('INSERT INTO quizzes (module_id, titulo, descricao) VALUES (:m, :t, :d)')
             ->execute([':m' => $mId, ':t' => $titulo, ':d' => $descricao]);
 
         flash('success', 'Quiz criado com sucesso.');
-        redirect('admin/quiz.php?module_id=' . $mId);
+        redirect($quizPath . '?module_id=' . $mId);
     }
 
     if ($action === 'update_quiz') {
@@ -38,23 +43,34 @@ if (is_post()) {
         $stmt->execute([':id' => $quizId]);
         $mId = (int) ($stmt->fetchColumn() ?: 0);
 
+        if (!can_manage_module($pdo, $mId, $manager)) {
+            http_response_code(403);
+            exit('Você não tem permissão para alterar este quiz.');
+        }
+
         if ($quizId <= 0 || $titulo === '' || $mId <= 0) {
             flash('error', 'Dados inválidos.');
-            redirect('admin/quiz.php');
+            redirect($quizPath);
         }
 
         $pdo->prepare('UPDATE quizzes SET titulo = :t, descricao = :d WHERE id = :id')
             ->execute([':t' => $titulo, ':d' => $descricao, ':id' => $quizId]);
 
         flash('success', 'Quiz atualizado.');
-        redirect('admin/quiz.php?module_id=' . $mId);
+        redirect($quizPath . '?module_id=' . $mId);
     }
 
     if ($action === 'delete_quiz') {
         $quizId = (int) ($_POST['quiz_id'] ?? 0);
+        $stmt = $pdo->prepare('SELECT module_id FROM quizzes WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $quizId]);
+        if (!can_manage_module($pdo, (int) ($stmt->fetchColumn() ?: 0), $manager)) {
+            http_response_code(403);
+            exit('Você não tem permissão para excluir este quiz.');
+        }
         $pdo->prepare('DELETE FROM quizzes WHERE id = :id')->execute([':id' => $quizId]);
         flash('success', 'Quiz excluído.');
-        redirect('admin/quiz.php');
+        redirect($quizPath);
     }
 
     if ($action === 'save_question') {
@@ -73,9 +89,14 @@ if (is_post()) {
         $stmt->execute([':id' => $quizId]);
         $mId = (int) ($stmt->fetchColumn() ?: 0);
 
+        if (!can_manage_module($pdo, $mId, $manager)) {
+            http_response_code(403);
+            exit('Você não tem permissão para alterar este quiz.');
+        }
+
         if ($pergunta === '' || in_array('', $opts, true) || !in_array($correta, ['a','b','c','d'], true)) {
             flash('error', 'Preencha a pergunta, todas as 4 opções e marque a correta.');
-            redirect('admin/quiz.php?module_id=' . $mId);
+            redirect($quizPath . '?module_id=' . $mId);
         }
 
         $pdo->beginTransaction();
@@ -107,7 +128,7 @@ if (is_post()) {
             flash('error', 'Erro ao salvar pergunta.');
         }
 
-        redirect('admin/quiz.php?module_id=' . $mId);
+        redirect($quizPath . '?module_id=' . $mId);
     }
 
     if ($action === 'delete_question') {
@@ -118,16 +139,25 @@ if (is_post()) {
         $stmt->execute([':id' => $quizId]);
         $mId = (int) ($stmt->fetchColumn() ?: 0);
 
+        if (!can_manage_module($pdo, $mId, $manager)) {
+            http_response_code(403);
+            exit('Você não tem permissão para alterar este quiz.');
+        }
+
         $pdo->prepare('DELETE FROM quiz_questions WHERE id = :id AND quiz_id = :qid')
             ->execute([':id' => $questionId, ':qid' => $quizId]);
 
         flash('success', 'Pergunta excluída.');
-        redirect('admin/quiz.php?module_id=' . $mId);
+        redirect($quizPath . '?module_id=' . $mId);
     }
 }
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
 if ($moduleId > 0) {
+    if (!can_manage_module($pdo, $moduleId, $manager)) {
+        http_response_code(403);
+        exit('Você não tem permissão para gerenciar este módulo.');
+    }
     // ── Module quiz management ────────────────────────────────────────────────
     $moduleStmt = $pdo->prepare('SELECT id, titulo FROM modules WHERE id = :id LIMIT 1');
     $moduleStmt->execute([':id' => $moduleId]);
@@ -135,7 +165,7 @@ if ($moduleId > 0) {
 
     if (!$module) {
         flash('error', 'Módulo não encontrado.');
-        redirect('admin/quiz.php');
+        redirect($quizPath);
     }
 
     $quizStmt = $pdo->prepare('SELECT id, titulo, descricao FROM quizzes WHERE module_id = :mid LIMIT 1');
@@ -205,7 +235,7 @@ if ($moduleId > 0) {
                         <h1><?= e($module['titulo']) ?></h1>
                         <p>Gerenciamento do quiz deste módulo</p>
                     </div>
-                    <a class="btn btn-ghost" href="<?= e(url('admin/quiz.php')) ?>">← Todos os módulos</a>
+                    <a class="btn btn-ghost" href="<?= e(url($quizPath)) ?>">← Todos os módulos</a>
                 </div>
             </section>
 
@@ -267,7 +297,7 @@ if ($moduleId > 0) {
                                     <strong><?= ($i + 1) ?>. <?= e($question['pergunta']) ?></strong>
                                     <div class="inline-form">
                                         <a class="btn btn-ghost"
-                                           href="<?= e(url('admin/quiz.php?module_id=' . $moduleId . '&edit_question=' . (int) $question['id'])) ?>">
+                                           href="<?= e(url($quizPath . '?module_id=' . $moduleId . '&edit_question=' . (int) $question['id'])) ?>">
                                             Editar
                                         </a>
                                         <form method="post" onsubmit="return confirm('Excluir esta pergunta?');">
@@ -302,7 +332,7 @@ if ($moduleId > 0) {
                     <div class="panel-header">
                         <h2><?= $editQuestion ? 'Editar pergunta' : 'Nova pergunta' ?></h2>
                         <?php if ($editQuestion): ?>
-                            <a class="btn btn-ghost" href="<?= e(url('admin/quiz.php?module_id=' . $moduleId)) ?>">Cancelar edição</a>
+                            <a class="btn btn-ghost" href="<?= e(url($quizPath . '?module_id=' . $moduleId)) ?>">Cancelar edição</a>
                         <?php endif; ?>
                     </div>
                     <form method="post" class="form-grid">
@@ -394,16 +424,21 @@ if ($moduleId > 0) {
     <?php
 } else {
     // ── Module list ───────────────────────────────────────────────────────────
-    $modulesStmt = $pdo->query(
-        'SELECT m.id, m.titulo, m.ordem,
+    $modulesSql = 'SELECT m.id, m.titulo, m.ordem,
                 q.id AS quiz_id,
                 q.titulo AS quiz_titulo,
                 (SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = q.id) AS total_perguntas,
                 (SELECT COUNT(*) FROM quiz_attempts qa WHERE qa.quiz_id = q.id) AS total_tentativas
          FROM modules m
-         LEFT JOIN quizzes q ON q.module_id = m.id
-         ORDER BY m.ordem ASC, m.id ASC'
-    );
+         LEFT JOIN quizzes q ON q.module_id = m.id';
+    $modulesParams = [];
+    if (!$isAdmin) {
+        $modulesSql .= ' WHERE m.professor_id = :professor_id';
+        $modulesParams[':professor_id'] = $managerId;
+    }
+    $modulesSql .= ' ORDER BY m.ordem ASC, m.id ASC';
+    $modulesStmt = $pdo->prepare($modulesSql);
+    $modulesStmt->execute($modulesParams);
     $modules = $modulesStmt->fetchAll();
 
     $active_page = 'quiz';
@@ -447,7 +482,7 @@ if ($moduleId > 0) {
                                     <td><?= $mod['quiz_id'] ? e((string) $mod['total_tentativas']) : '—' ?></td>
                                     <td>
                                         <a class="btn btn-ghost"
-                                           href="<?= e(url('admin/quiz.php?module_id=' . (int) $mod['id'])) ?>">
+                                           href="<?= e(url($quizPath . '?module_id=' . (int) $mod['id'])) ?>">
                                             Gerenciar
                                         </a>
                                     </td>

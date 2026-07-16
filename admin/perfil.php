@@ -2,13 +2,10 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_login();
-
-if (($_SESSION['role'] ?? '') !== 'admin') {
-    redirect('pages/dashboard.php');
-}
+require_content_manager();
 
 $userId = (int) ($_SESSION['user_id'] ?? 0);
+$profilePath = content_manager_path('perfil.php');
 $maxImageBytes = 3 * 1024 * 1024;
 
 function admin_create_image(string $tmpName, string $mimeType)
@@ -89,24 +86,24 @@ if (is_post()) {
         }
 
         flash('success', 'Foto removida.');
-        redirect('admin/perfil.php');
+        redirect($profilePath);
     }
 
     if ($action === 'upload_photo') {
         if (!isset($_FILES['foto']) || !is_array($_FILES['foto'])) {
             flash('error', 'Selecione uma imagem para enviar.');
-            redirect('admin/perfil.php');
+            redirect($profilePath);
         }
 
         $file = $_FILES['foto'];
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             flash('error', 'Falha no upload da foto.');
-            redirect('admin/perfil.php');
+            redirect($profilePath);
         }
 
         if ((int) $file['size'] > $maxImageBytes) {
             flash('error', 'A foto deve ter no máximo 3MB.');
-            redirect('admin/perfil.php');
+            redirect($profilePath);
         }
 
         $tmpName  = (string) $file['tmp_name'];
@@ -117,7 +114,7 @@ if (is_post()) {
         $allowed = ['image/jpeg', 'image/png', 'image/webp'];
         if (!in_array($mimeType, $allowed, true)) {
             flash('error', 'Formato não permitido. Use JPG, PNG ou WEBP.');
-            redirect('admin/perfil.php');
+            redirect($profilePath);
         }
 
         $extension = match ($mimeType) {
@@ -136,7 +133,7 @@ if (is_post()) {
             $target  = $uploadDir . DIRECTORY_SEPARATOR . $newFile;
             if (!move_uploaded_file($tmpName, $target)) {
                 flash('error', 'Não foi possível processar sua foto.');
-                redirect('admin/perfil.php');
+                redirect($profilePath);
             }
         }
 
@@ -155,7 +152,7 @@ if (is_post()) {
         }
 
         flash('success', 'Foto atualizada com sucesso!');
-        redirect('admin/perfil.php');
+        redirect($profilePath);
     }
 }
 

@@ -54,7 +54,7 @@ if ($user) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/png" href="<?= e(url('assets/img/logo fl360.png')) ?>">
-    <link rel="stylesheet" href="<?= e(url('assets/css/style.css')) ?>?v=8">
+    <link rel="stylesheet" href="<?= e(url('assets/css/style.css')) ?>?v=9">
     <script defer src="<?= e(url('assets/js/app.js')) ?>"></script>
 </head>
 <body>
@@ -71,9 +71,7 @@ if ($user) {
             <button class="theme-toggle mobile-only" id="sidebarToggle" type="button" aria-label="Abrir menu">
                 Menu
             </button>
-            <span class="topbar-label">
-                <?= (($user['role'] ?? '') === 'admin') ? 'Painel Administrativo' : 'Portal do Aluno' ?>
-            </span>
+            <span class="topbar-label"><?= match ($user['role'] ?? '') { 'admin' => 'Administração', 'professor' => 'Área do Professor', default => 'Portal do Aluno' } ?></span>
         </div>
         <div class="topbar-right">
             <?php if (($user['role'] ?? '') === 'aluno'): ?>
@@ -111,16 +109,16 @@ if ($user) {
 
             <span class="topbar-user">Olá, <?= e($user['nome']) ?></span>
 
-            <div class="user-avatar" title="Perfil">
+            <a class="user-avatar" title="Abrir perfil" href="<?= e(url(match ($user['role'] ?? '') { 'admin' => 'admin/perfil.php', 'professor' => 'professor/perfil.php', default => 'pages/perfil.php' })) ?>">
                 <?php if ($avatarUrl): ?>
                     <img src="<?= e($avatarUrl) ?>" alt="Foto de perfil">
                 <?php else: ?>
                     <span><?= e($avatarInitial) ?></span>
                 <?php endif; ?>
-            </div>
+            </a>
 
             <button class="theme-toggle" id="themeToggle" type="button" aria-label="Alternar tema">
-                Alternar tema
+                <span aria-hidden="true">◐</span><span class="theme-label">Tema</span>
             </button>
             <a class="btn btn-ghost" href="<?= e(url('logout.php')) ?>">Sair</a>
         </div>

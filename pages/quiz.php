@@ -2,11 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_login();
-
-if (($_SESSION['role'] ?? '') !== 'aluno') {
-    redirect('admin/dashboard.php');
-}
+require_student();
 
 $user      = current_user($pdo);
 $userId    = (int) $user['id'];

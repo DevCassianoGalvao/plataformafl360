@@ -16,7 +16,7 @@ if (is_post()) {
         $senha = (string) ($_POST['senha'] ?? '');
         $role = (string) ($_POST['role'] ?? 'aluno');
 
-        if ($nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || $senha === '' || !in_array($role, ['admin', 'aluno'], true)) {
+        if ($nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || $senha === '' || !in_array($role, ['admin', 'professor', 'aluno'], true)) {
             flash('error', 'Dados invalidos para criar usuario.');
             redirect('admin/usuarios.php');
         }
@@ -48,7 +48,7 @@ if (is_post()) {
         $role = (string) ($_POST['role'] ?? 'aluno');
         $novaSenha = (string) ($_POST['nova_senha'] ?? '');
 
-        if ($id <= 0 || $nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || !in_array($role, ['admin', 'aluno'], true)) {
+        if ($id <= 0 || $nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || !in_array($role, ['admin', 'professor', 'aluno'], true)) {
             flash('error', 'Dados invalidos para atualizar usuario.');
             redirect('admin/usuarios.php');
         }
@@ -145,6 +145,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <label for="role">Tipo de usuario</label>
                 <select id="role" name="role" required>
                     <option value="aluno">Aluno</option>
+                    <option value="professor">Professor</option>
                     <option value="admin">Admin</option>
                 </select>
 
@@ -186,6 +187,7 @@ require_once __DIR__ . '/../includes/header.php';
                                         <input type="password" name="nova_senha" placeholder="Nova senha (opcional)">
                                         <select name="role" required>
                                             <option value="aluno" <?= $user['role'] === 'aluno' ? 'selected' : '' ?>>Aluno</option>
+                                            <option value="professor" <?= $user['role'] === 'professor' ? 'selected' : '' ?>>Professor</option>
                                             <option value="admin" <?= $user['role'] === 'admin' ? 'selected' : '' ?>>Admin</option>
                                         </select>
                                         <button class="btn btn-primary" type="submit">Salvar</button>

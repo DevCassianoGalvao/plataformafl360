@@ -2,11 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_login();
-
-if (($_SESSION['role'] ?? '') !== 'aluno') {
-    redirect('admin/dashboard.php');
-}
+require_student();
 
 $user = current_user($pdo);
 $userId = (int) $user['id'];
@@ -14,7 +10,7 @@ $lessonId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $progressTable = progress_table_name($pdo);
 
 if ($lessonId <= 0) {
-    flash(‘error’, ‘Aula inválida.’);
+    flash('error', 'Aula inválida.');
     redirect('pages/modulos.php');
 }
 
@@ -35,7 +31,7 @@ if (is_post()) {
             $insertStmt->execute([':user_id' => $userId, ':lesson_id' => $lessonId]);
         }
 
-        flash(‘success’, ‘Aula marcada como concluída.’);
+        flash('success', 'Aula marcada como concluída.');
     }
 
     redirect('pages/aula.php?id=' . $lessonId);
@@ -52,7 +48,7 @@ $lessonStmt->execute([':id' => $lessonId]);
 $lesson = $lessonStmt->fetch();
 
 if (!$lesson) {
-    flash(‘error’, ‘Aula não encontrada.’);
+    flash('error', 'Aula não encontrada.');
     redirect('pages/modulos.php');
 }
 
@@ -60,8 +56,17 @@ $statusStmt = $pdo->prepare("SELECT completed FROM {$progressTable} WHERE user_i
 $statusStmt->execute([':user_id' => $userId, ':lesson_id' => $lessonId]);
 $completed = ((int) ($statusStmt->fetchColumn() ?: 0)) === 1;
 
-$materialsStmt = $pdo->prepare('SELECT id, titulo, arquivo FROM materials WHERE lesson_id = :lesson_id ORDER BY id DESC');
-$materialsStmt->execute([':lesson_id' => $lessonId]);
+if (db_column_exists($pdo, 'materials', 'module_id')) {
+    $materialsStmt = $pdo->prepare(
+        'SELECT id, titulo, arquivo FROM materials
+         WHERE lesson_id = :lesson_id OR (module_id = :module_id AND lesson_id IS NULL)
+         ORDER BY lesson_id DESC, id DESC'
+    );
+    $materialsStmt->execute([':lesson_id' => $lessonId, ':module_id' => (int) $lesson['module_id']]);
+} else {
+    $materialsStmt = $pdo->prepare('SELECT id, titulo, arquivo FROM materials WHERE lesson_id = :lesson_id ORDER BY id DESC');
+    $materialsStmt->execute([':lesson_id' => $lessonId]);
+}
 $materials = $materialsStmt->fetchAll();
 
 $nextStmt = $pdo->prepare(
@@ -94,7 +99,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <p><?= e($lesson['modulo_titulo']) ?></p>
                 </div>
                 <span class="badge <?= $completed ? 'badge-success' : 'badge-neutral' ?>">
-                    <?= $completed ? ‘Concluída’ : ‘Pendente’ ?>
+                    <?= $completed ? 'Concluída' : 'Pendente' ?>
                 </span>
             </div>
 
@@ -119,10 +124,10 @@ require_once __DIR__ . '/../includes/header.php';
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="complete">
                 <button type="submit" class="btn btn-primary" <?= $completed ? 'disabled' : '' ?>>
-                    <?= $completed ? ‘Aula já concluída’ : ‘Marcar aula como concluída’ ?>
+                    <?= $completed ? 'Aula já concluída' : 'Marcar aula como concluída' ?>
                 </button>
                 <?php if ($nextId > 0): ?>
-                    <a class="btn btn-ghost" href="<?= e(url(‘pages/aula.php?id=’ . $nextId)) ?>">Próxima aula</a>
+                    <a class="btn btn-ghost" href="<?= e(url('pages/aula.php?id=' . $nextId)) ?>">Próxima aula</a>
                 <?php endif; ?>
             </form>
         </section>
@@ -163,7 +168,4 @@ require_once __DIR__ . '/../includes/header.php';
     </main>
 </div>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
-
-
-
 

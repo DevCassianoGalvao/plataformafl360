@@ -105,6 +105,80 @@ function require_admin(): void
     }
 }
 
+function current_role(): string
+{
+    return (string) ($_SESSION['role'] ?? '');
+}
+
+function role_home_path(?string $role = null): string
+{
+    return match ($role ?? current_role()) {
+        'admin' => 'admin/dashboard.php',
+        'professor' => 'professor/dashboard.php',
+        default => 'pages/dashboard.php',
+    };
+}
+
+function redirect_to_role_home(): void
+{
+    redirect(role_home_path());
+}
+
+function require_student(): void
+{
+    require_login();
+    if (current_role() !== 'aluno') {
+        redirect_to_role_home();
+    }
+}
+
+function require_professor(): void
+{
+    require_login();
+    if (current_role() !== 'professor') {
+        redirect_to_role_home();
+    }
+}
+
+function require_content_manager(): void
+{
+    require_login();
+    if (!in_array(current_role(), ['admin', 'professor'], true)) {
+        flash('error', 'Acesso permitido apenas para administradores e professores.');
+        redirect_to_role_home();
+    }
+}
+
+function content_manager_path(string $page): string
+{
+    $area = current_role() === 'professor' ? 'professor' : 'admin';
+    return $area . '/' . ltrim($page, '/');
+}
+
+function can_manage_module(PDO $pdo, int $moduleId, ?array $user = null): bool
+{
+    if ($moduleId <= 0) {
+        return false;
+    }
+
+    $user ??= current_user($pdo);
+    if (!$user) {
+        return false;
+    }
+
+    if (($user['role'] ?? '') === 'admin') {
+        return true;
+    }
+
+    if (($user['role'] ?? '') !== 'professor' || !db_column_exists($pdo, 'modules', 'professor_id')) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM modules WHERE id = :id AND professor_id = :professor_id');
+    $stmt->execute([':id' => $moduleId, ':professor_id' => (int) $user['id']]);
+    return ((int) $stmt->fetchColumn()) > 0;
+}
+
 function flash(string $key, ?string $message = null): ?string
 {
     if ($message !== null) {
@@ -161,8 +235,7 @@ function require_csrf_token(?string $token): void
         redirect('login.php');
     }
 
-    $fallback = (($_SESSION['role'] ?? '') === 'admin') ? 'admin/dashboard.php' : 'pages/dashboard.php';
-    redirect($fallback);
+    redirect(role_home_path());
 }
 
 function ensure_upload_dir(): string
@@ -502,4 +575,3 @@ function ensure_default_admin(PDO $pdo): void
 }
 
 ensure_schema_updates($pdo);
-ensure_default_admin($pdo);

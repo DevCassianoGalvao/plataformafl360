@@ -7,8 +7,4 @@ if (!is_logged_in()) {
     redirect('login.php');
 }
 
-if (($_SESSION['role'] ?? '') === 'admin') {
-    redirect('admin/dashboard.php');
-}
-
-redirect('pages/dashboard.php');
+redirect_to_role_home();

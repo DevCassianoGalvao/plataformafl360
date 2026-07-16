@@ -6,6 +6,7 @@ require_admin();
 
 $userCount = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
 $studentCount = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'aluno'")->fetchColumn();
+$professorCount = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'professor'")->fetchColumn();
 $moduleCount = (int) $pdo->query('SELECT COUNT(*) FROM modules')->fetchColumn();
 $lessonCount = (int) $pdo->query('SELECT COUNT(*) FROM lessons')->fetchColumn();
 $materialCount = (int) $pdo->query('SELECT COUNT(*) FROM materials')->fetchColumn();
@@ -21,17 +22,24 @@ require_once __DIR__ . '/../includes/header.php';
     <?php require_once __DIR__ . '/../includes/sidebar.php'; ?>
 
     <main class="content-area">
-        <section class="hero-card">
-            <h1>Painel Administrativo FL360</h1>
-            <p>Gerencie usuários, módulos, aulas, materiais e comunicados do programa.</p>
+        <section class="hero-card dashboard-hero">
+            <div><span class="eyebrow">Visão geral</span><h1>Administração FL360</h1>
+            <p>Gerencie pessoas, comunicação e governança da plataforma.</p></div>
+            <a class="btn btn-primary" href="<?= e(url('admin/usuarios.php')) ?>">Novo usuário</a>
         </section>
 
         <section class="stats-grid">
             <article class="stat-card"><h3>Usuários</h3><strong><?= e((string) $userCount) ?></strong></article>
             <article class="stat-card"><h3>Alunos</h3><strong><?= e((string) $studentCount) ?></strong></article>
+            <article class="stat-card"><h3>Professores</h3><strong><?= e((string) $professorCount) ?></strong></article>
             <article class="stat-card"><h3>Módulos</h3><strong><?= e((string) $moduleCount) ?></strong></article>
             <article class="stat-card"><h3>Aulas</h3><strong><?= e((string) $lessonCount) ?></strong></article>
             <article class="stat-card"><h3>Materiais</h3><strong><?= e((string) $materialCount) ?></strong></article>
+        </section>
+
+        <section class="panel admin-pedagogy-card">
+            <div><span class="eyebrow">Acesso secundário</span><h2>Gestão pedagógica</h2><p>Admin pode revisar módulos, aulas, materiais e quizzes quando necessário.</p></div>
+            <a href="<?= e(url('admin/modulos.php')) ?>" class="btn btn-ghost">Abrir conteúdo</a>
         </section>
 
         <section class="panel">

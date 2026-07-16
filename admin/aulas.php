@@ -2,197 +2,134 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/auth.php';
-require_admin();
+require_content_manager();
+
+$manager = current_user($pdo);
+$managerId = (int) $manager['id'];
+$isAdmin = $manager['role'] === 'admin';
+$returnPath = content_manager_path('aulas.php');
+
+if (!db_column_exists($pdo, 'modules', 'professor_id')) {
+    flash('error', 'Execute a atualização do banco antes de gerenciar professores.');
+    redirect($isAdmin ? 'admin/migracoes.php' : 'professor/dashboard.php');
+}
 
 if (is_post()) {
     require_csrf_token($_POST['csrf_token'] ?? null);
     $action = (string) ($_POST['action'] ?? '');
+    $id = (int) ($_POST['id'] ?? 0);
 
-    if ($action === 'create') {
+    if ($action === 'create' || $action === 'update') {
         $moduleId = (int) ($_POST['module_id'] ?? 0);
         $titulo = trim((string) ($_POST['titulo'] ?? ''));
         $descricao = trim((string) ($_POST['descricao'] ?? ''));
         $videoUrl = trim((string) ($_POST['video_url'] ?? ''));
-        $ordem = (int) ($_POST['ordem'] ?? 0);
+        $ordem = max(0, (int) ($_POST['ordem'] ?? 0));
 
-        if ($moduleId <= 0 || $titulo === '' || $videoUrl === '') {
-            flash('error', 'Preencha módulo, título e URL do vídeo.');
-            redirect('admin/aulas.php');
+        if (!can_manage_module($pdo, $moduleId, $manager) || $titulo === '' || get_youtube_embed_url($videoUrl) === '') {
+            flash('error', 'Selecione um módulo permitido e informe título e URL do YouTube.');
+            redirect($returnPath);
         }
 
-        $stmt = $pdo->prepare(
-            'INSERT INTO lessons (module_id, titulo, descricao, video_url, ordem)
-             VALUES (:module_id, :titulo, :descricao, :video_url, :ordem)'
-        );
-        $stmt->execute([
-            ':module_id' => $moduleId,
-            ':titulo' => $titulo,
-            ':descricao' => $descricao,
-            ':video_url' => $videoUrl,
-            ':ordem' => $ordem,
-        ]);
-
-        $lessonId = (int) $pdo->lastInsertId();
-        create_notification(
-            $pdo,
-            'aula',
-            'Nova aula liberada',
-            'A aula "' . $titulo . '" já está disponível para acesso.',
-            'pages/aula.php?id=' . $lessonId
-        );
-
-        flash('success', 'Aula criada com sucesso.');
-        redirect('admin/aulas.php');
-    }
-
-    if ($action === 'update') {
-        $id = (int) ($_POST['id'] ?? 0);
-        $moduleId = (int) ($_POST['module_id'] ?? 0);
-        $titulo = trim((string) ($_POST['titulo'] ?? ''));
-        $descricao = trim((string) ($_POST['descricao'] ?? ''));
-        $videoUrl = trim((string) ($_POST['video_url'] ?? ''));
-        $ordem = (int) ($_POST['ordem'] ?? 0);
-
-        if ($id <= 0 || $moduleId <= 0 || $titulo === '' || $videoUrl === '') {
-            flash('error', 'Dados inválidos para atualizar aula.');
-            redirect('admin/aulas.php');
+        if ($action === 'update') {
+            $find = $pdo->prepare('SELECT module_id FROM lessons WHERE id = :id');
+            $find->execute([':id' => $id]);
+            $oldModuleId = (int) ($find->fetchColumn() ?: 0);
+            if ($id <= 0 || !can_manage_module($pdo, $oldModuleId, $manager)) {
+                flash('error', 'Você não tem permissão para alterar esta aula.');
+                redirect($returnPath);
+            }
+            $stmt = $pdo->prepare(
+                'UPDATE lessons SET module_id = :module_id, titulo = :titulo, descricao = :descricao,
+                 video_url = :video_url, ordem = :ordem WHERE id = :id'
+            );
+            $stmt->execute([':module_id' => $moduleId, ':titulo' => $titulo, ':descricao' => $descricao, ':video_url' => $videoUrl, ':ordem' => $ordem, ':id' => $id]);
+            flash('success', 'Aula atualizada.');
+        } else {
+            $stmt = $pdo->prepare(
+                'INSERT INTO lessons (module_id, titulo, descricao, video_url, ordem)
+                 VALUES (:module_id, :titulo, :descricao, :video_url, :ordem)'
+            );
+            $stmt->execute([':module_id' => $moduleId, ':titulo' => $titulo, ':descricao' => $descricao, ':video_url' => $videoUrl, ':ordem' => $ordem]);
+            $lessonId = (int) $pdo->lastInsertId();
+            create_notification($pdo, 'aula', 'Nova aula liberada', 'A aula "' . $titulo . '" já está disponível.', 'pages/aula.php?id=' . $lessonId);
+            flash('success', 'Aula criada com sucesso.');
         }
-
-        $stmt = $pdo->prepare(
-            'UPDATE lessons
-             SET module_id = :module_id, titulo = :titulo, descricao = :descricao, video_url = :video_url, ordem = :ordem
-             WHERE id = :id'
-        );
-        $stmt->execute([
-            ':module_id' => $moduleId,
-            ':titulo' => $titulo,
-            ':descricao' => $descricao,
-            ':video_url' => $videoUrl,
-            ':ordem' => $ordem,
-            ':id' => $id,
-        ]);
-
-        flash('success', 'Aula atualizada.');
-        redirect('admin/aulas.php');
+        redirect($returnPath);
     }
 
     if ($action === 'delete') {
-        $id = (int) ($_POST['id'] ?? 0);
+        $find = $pdo->prepare('SELECT module_id FROM lessons WHERE id = :id');
+        $find->execute([':id' => $id]);
+        if (!can_manage_module($pdo, (int) ($find->fetchColumn() ?: 0), $manager)) {
+            flash('error', 'Você não tem permissão para excluir esta aula.');
+            redirect($returnPath);
+        }
         $stmt = $pdo->prepare('DELETE FROM lessons WHERE id = :id');
         $stmt->execute([':id' => $id]);
-
         flash('success', 'Aula excluída.');
-        redirect('admin/aulas.php');
+        redirect($returnPath);
     }
 }
 
-$modules = $pdo->query('SELECT id, titulo FROM modules ORDER BY ordem ASC, id ASC')->fetchAll();
-
-$lessonsStmt = $pdo->query(
-    'SELECT l.id, l.module_id, l.titulo, l.descricao, l.video_url, l.ordem, m.titulo AS modulo_titulo
-     FROM lessons l
-     INNER JOIN modules m ON m.id = l.module_id
-     ORDER BY m.ordem ASC, l.ordem ASC, l.id ASC'
-);
-$lessons = $lessonsStmt->fetchAll();
+if ($isAdmin) {
+    $modules = $pdo->query('SELECT id, titulo FROM modules ORDER BY ordem, id')->fetchAll();
+    $lessons = $pdo->query(
+        'SELECT l.id, l.module_id, l.titulo, l.descricao, l.video_url, l.ordem, m.titulo AS modulo_titulo
+         FROM lessons l INNER JOIN modules m ON m.id = l.module_id ORDER BY m.ordem, l.ordem, l.id'
+    )->fetchAll();
+} else {
+    $stmt = $pdo->prepare('SELECT id, titulo FROM modules WHERE professor_id = :id ORDER BY ordem, id');
+    $stmt->execute([':id' => $managerId]);
+    $modules = $stmt->fetchAll();
+    $stmt = $pdo->prepare(
+        'SELECT l.id, l.module_id, l.titulo, l.descricao, l.video_url, l.ordem, m.titulo AS modulo_titulo
+         FROM lessons l INNER JOIN modules m ON m.id = l.module_id
+         WHERE m.professor_id = :id ORDER BY m.ordem, l.ordem, l.id'
+    );
+    $stmt->execute([':id' => $managerId]);
+    $lessons = $stmt->fetchAll();
+}
 
 $active_page = 'aulas';
-$page_title = 'Gerenciar Aulas';
+$page_title = 'Aulas';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <div class="app-layout">
     <?php require_once __DIR__ . '/../includes/sidebar.php'; ?>
-
     <main class="content-area">
+        <section class="page-heading"><div><span class="eyebrow">Gestão pedagógica</span><h1>Aulas</h1><p>Publique vídeos do YouTube e organize a sequência de estudo.</p></div></section>
         <section class="panel">
-            <div class="panel-header"><h1>Nova aula</h1></div>
-
-            <?php if (!$modules): ?>
-                <p>Cadastre um módulo antes de criar aulas.</p>
-            <?php else: ?>
-                <form method="post" class="form-grid">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="create">
-
-                    <label for="module_id">Módulo</label>
-                    <select id="module_id" name="module_id" required>
-                        <option value="">Selecione...</option>
-                        <?php foreach ($modules as $module): ?>
-                            <option value="<?= e((string) $module['id']) ?>"><?= e($module['titulo']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-
-                    <label for="titulo">Título</label>
-                    <input id="titulo" type="text" name="titulo" required>
-
-                    <label for="descricao">Descrição</label>
-                    <textarea id="descricao" name="descricao" rows="3"></textarea>
-
-                    <label for="video_url">URL do YouTube</label>
-                    <input id="video_url" type="url" name="video_url" required placeholder="https://www.youtube.com/watch?v=...">
-
-                    <label for="ordem">Ordem</label>
-                    <input id="ordem" type="number" name="ordem" value="1" min="0">
-
-                    <button type="submit" class="btn btn-primary">Criar aula</button>
-                </form>
-            <?php endif; ?>
+            <div class="panel-header"><h2>Nova aula</h2></div>
+            <?php if (!$modules): ?><p>Crie ou atribua um módulo antes de publicar aulas.</p><?php else: ?>
+            <form method="post" class="form-grid form-grid-columns">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="create">
+                <label>Módulo<select name="module_id" required><option value="">Selecione</option><?php foreach ($modules as $module): ?><option value="<?= (int) $module['id'] ?>"><?= e($module['titulo']) ?></option><?php endforeach; ?></select></label>
+                <label>Ordem<input type="number" name="ordem" value="1" min="0"></label>
+                <label class="field-wide">Título<input type="text" name="titulo" maxlength="180" required></label>
+                <label class="field-wide">Descrição<textarea name="descricao" rows="3"></textarea></label>
+                <label class="field-wide">URL do YouTube<input type="url" name="video_url" placeholder="https://www.youtube.com/watch?v=..." required></label>
+                <div class="field-wide"><button class="btn btn-primary" type="submit">Publicar aula</button></div>
+            </form><?php endif; ?>
         </section>
-
         <section class="panel">
-            <div class="panel-header"><h2>Lista de aulas</h2></div>
-
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Dados da aula</th>
-                        <th>Módulo</th>
-                        <th>Ações</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php if (!$lessons): ?>
-                        <tr><td colspan="4">Nenhuma aula cadastrada.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($lessons as $lesson): ?>
-                            <tr>
-                                <td><?= e((string) $lesson['id']) ?></td>
-                                <td>
-                                    <form method="post" class="inline-form wrap">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                        <input type="hidden" name="action" value="update">
-                                        <input type="hidden" name="id" value="<?= e((string) $lesson['id']) ?>">
-
-                                        <input type="text" name="titulo" value="<?= e($lesson['titulo']) ?>" required>
-                                        <input type="text" name="descricao" value="<?= e($lesson['descricao']) ?>">
-                                        <input type="url" name="video_url" value="<?= e($lesson['video_url']) ?>" required>
-                                        <input type="number" name="ordem" value="<?= e((string) $lesson['ordem']) ?>" min="0">
-                                        <select name="module_id" required>
-                                            <?php foreach ($modules as $module): ?>
-                                                <option value="<?= e((string) $module['id']) ?>" <?= (int) $lesson['module_id'] === (int) $module['id'] ? 'selected' : '' ?>>
-                                                    <?= e($module['titulo']) ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                        <button class="btn btn-primary" type="submit">Salvar</button>
-                                    </form>
-                                </td>
-                                <td><?= e($lesson['modulo_titulo']) ?></td>
-                                <td>
-                                    <form method="post" onsubmit="return confirm('Excluir esta aula?');">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                        <input type="hidden" name="action" value="delete">
-                                        <input type="hidden" name="id" value="<?= e((string) $lesson['id']) ?>">
-                                        <button class="btn btn-danger" type="submit">Excluir</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <div class="panel-header"><h2>Aulas publicadas</h2><span class="badge badge-neutral"><?= count($lessons) ?> itens</span></div>
+            <div class="management-list">
+            <?php if (!$lessons): ?><p>Nenhuma aula cadastrada.</p><?php endif; ?>
+            <?php foreach ($lessons as $lesson): ?>
+                <article class="management-card">
+                    <form method="post" class="management-form">
+                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="<?= (int) $lesson['id'] ?>">
+                        <div class="management-card-head"><span class="badge badge-neutral"><?= e($lesson['modulo_titulo']) ?></span><span>Ordem <?= (int) $lesson['ordem'] ?></span></div>
+                        <label>Título<input type="text" name="titulo" value="<?= e($lesson['titulo']) ?>" required></label>
+                        <label>Descrição<textarea name="descricao" rows="2"><?= e($lesson['descricao']) ?></textarea></label>
+                        <label>URL do YouTube<input type="url" name="video_url" value="<?= e($lesson['video_url']) ?>" required></label>
+                        <div class="inline-form wrap"><label>Módulo<select name="module_id"><?php foreach ($modules as $module): ?><option value="<?= (int) $module['id'] ?>" <?= (int) $lesson['module_id'] === (int) $module['id'] ? 'selected' : '' ?>><?= e($module['titulo']) ?></option><?php endforeach; ?></select></label><label>Ordem<input type="number" name="ordem" value="<?= (int) $lesson['ordem'] ?>" min="0"></label></div>
+                        <button class="btn btn-primary" type="submit">Salvar alterações</button>
+                    </form>
+                    <form method="post" onsubmit="return confirm('Excluir esta aula?');"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= (int) $lesson['id'] ?>"><button class="btn btn-danger btn-subtle" type="submit">Excluir aula</button></form>
+                </article>
+            <?php endforeach; ?>
             </div>
         </section>
     </main>

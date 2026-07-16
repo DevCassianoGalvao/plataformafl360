@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
     email       VARCHAR(180) NOT NULL,
     foto_perfil VARCHAR(255) NULL,
     senha       VARCHAR(255) NOT NULL,
-    role        ENUM('admin','aluno') NOT NULL DEFAULT 'aluno',
+    role        ENUM('admin','professor','aluno') NOT NULL DEFAULT 'aluno',
     criado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_users_email (email),
     KEY idx_users_role (role)
@@ -53,7 +53,11 @@ CREATE TABLE IF NOT EXISTS modules (
     titulo   VARCHAR(180) NOT NULL,
     descricao TEXT NULL,
     ordem    INT NOT NULL DEFAULT 0,
-    KEY idx_modules_ordem (ordem)
+    professor_id INT UNSIGNED NULL,
+    KEY idx_modules_ordem (ordem),
+    KEY idx_modules_professor (professor_id),
+    CONSTRAINT fk_modules_professor FOREIGN KEY (professor_id) REFERENCES users(id)
+        ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── TABELA: lessons ──────────────────────────────────────────────────────
@@ -74,10 +78,15 @@ CREATE TABLE IF NOT EXISTS lessons (
 -- ─── TABELA: materials ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS materials (
     id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    lesson_id INT UNSIGNED NOT NULL,
+    module_id INT UNSIGNED NULL,
+    lesson_id INT UNSIGNED NULL,
     titulo    VARCHAR(180) NOT NULL,
     arquivo   VARCHAR(255) NOT NULL,
+    KEY idx_materials_module (module_id),
     KEY idx_materials_lesson (lesson_id),
+    CONSTRAINT fk_materials_module
+        FOREIGN KEY (module_id) REFERENCES modules(id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT fk_materials_lesson
         FOREIGN KEY (lesson_id) REFERENCES lessons(id)
         ON DELETE CASCADE ON UPDATE CASCADE

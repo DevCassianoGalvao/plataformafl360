@@ -4,23 +4,30 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/auth.php';
 require_login();
 
-if (($_SESSION['role'] ?? '') !== 'aluno') {
-    redirect('admin/dashboard.php');
-}
-
 $materialId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 if ($materialId <= 0) {
     flash('error', 'Material inválido para download.');
     redirect('pages/materiais.php');
 }
 
-$stmt = $pdo->prepare('SELECT id, titulo, arquivo FROM materials WHERE id = :id LIMIT 1');
+$downloadSql = db_column_exists($pdo, 'materials', 'module_id')
+    ? 'SELECT mat.id, mat.titulo, mat.arquivo, COALESCE(mat.module_id, l.module_id) AS module_id
+       FROM materials mat LEFT JOIN lessons l ON l.id = mat.lesson_id WHERE mat.id = :id LIMIT 1'
+    : 'SELECT mat.id, mat.titulo, mat.arquivo, l.module_id
+       FROM materials mat INNER JOIN lessons l ON l.id = mat.lesson_id WHERE mat.id = :id LIMIT 1';
+$stmt = $pdo->prepare($downloadSql);
 $stmt->execute([':id' => $materialId]);
 $material = $stmt->fetch();
 
 if (!$material) {
     flash('error', 'Material não encontrado.');
     redirect('pages/materiais.php');
+}
+
+$user = current_user($pdo);
+if (($user['role'] ?? '') === 'professor' && !can_manage_module($pdo, (int) $material['module_id'], $user)) {
+    http_response_code(403);
+    exit('Você não tem permissão para baixar este material.');
 }
 
 $storedFile = basename((string) $material['arquivo']);
