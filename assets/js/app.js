@@ -65,15 +65,41 @@
         });
     });
 
+    function fallbackCopy(input) {
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+
+        try {
+            return document.execCommand('copy');
+        } catch (error) {
+            return false;
+        }
+    }
+
     document.querySelectorAll('[data-copy-target]').forEach(function (button) {
         button.addEventListener('click', function () {
             var input = document.getElementById(button.getAttribute('data-copy-target'));
             if (!input) return;
-            navigator.clipboard.writeText(input.value).then(function () {
-                var original = button.textContent;
-                button.textContent = 'Copiado';
-                setTimeout(function () { button.textContent = original; }, 1800);
-            });
+
+            var original = button.textContent;
+            var showResult = function (copied) {
+                button.textContent = copied ? 'Copiado' : 'Selecione e copie';
+                if (!copied) {
+                    input.focus();
+                    input.select();
+                }
+                setTimeout(function () { button.textContent = original; }, 2200);
+            };
+
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(input.value)
+                    .then(function () { showResult(true); })
+                    .catch(function () { showResult(fallbackCopy(input)); });
+                return;
+            }
+
+            showResult(fallbackCopy(input));
         });
     });
 

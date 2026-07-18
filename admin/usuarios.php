@@ -12,21 +12,17 @@ if (is_post()) {
     $action = (string) ($_POST['action'] ?? '');
     $id = (int) ($_POST['id'] ?? 0);
 
-    if ($action === 'approve' || $action === 'reject' || $action === 'verify') {
+    if ($action === 'approve' || $action === 'reject') {
         if ($id <= 0) {
             flash('error', 'Usuário inválido.');
             redirect($returnPath);
         }
         if ($action === 'approve') {
             $pdo->prepare("UPDATE users SET status = 'ativo' WHERE id = :id")->execute([':id' => $id]);
-            flash('success', 'Cadastro aprovado. O usuário poderá entrar após confirmar o e-mail.');
-        } elseif ($action === 'reject') {
+            flash('success', 'Cadastro aprovado. O usuário já pode entrar.');
+        } else {
             $pdo->prepare("UPDATE users SET status = 'rejeitado' WHERE id = :id")->execute([':id' => $id]);
             flash('success', 'Cadastro rejeitado.');
-        } else {
-            $pdo->prepare('UPDATE users SET email_verificado_em = NOW(), email_verification_hash = NULL, email_verification_expires = NULL WHERE id = :id')
-                ->execute([':id' => $id]);
-            flash('success', 'E-mail confirmado manualmente.');
         }
         redirect($returnPath);
     }
@@ -128,19 +124,16 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php foreach ($users as $user): ?>
                     <article class="user-admin-card <?= $user['status'] === 'pendente' ? 'is-pending' : '' ?>">
                         <div class="user-admin-head">
-                            <div class="avatar avatar-small"><?= e(mb_strtoupper(mb_substr($user['nome'], 0, 1))) ?></div>
-                            <div><strong><?= e($user['nome']) ?></strong><small><?= e($user['email']) ?></small></div>
+                            <div class="user-admin-identity"><strong><?= e($user['nome']) ?></strong><small><?= e($user['email']) ?></small></div>
                             <span class="badge badge-neutral"><?= e($user['role']) ?></span>
                         </div>
                         <div class="user-status-row">
                             <span class="badge <?= $user['status'] === 'ativo' ? 'badge-success' : ($user['status'] === 'pendente' ? 'badge-warning' : 'badge-danger') ?>"><?= e($user['status']) ?></span>
-                            <span><?= $user['email_verificado_em'] ? 'E-mail confirmado' : 'E-mail não confirmado' ?></span>
                         </div>
                         <?php if ($user['status'] === 'pendente'): ?>
                             <div class="inline-form wrap">
                                 <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="approve"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-primary">Aprovar</button></form>
                                 <form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="reject"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-danger">Rejeitar</button></form>
-                                <?php if (!$user['email_verificado_em']): ?><form method="post"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="verify"><input type="hidden" name="id" value="<?= (int) $user['id'] ?>"><button class="btn btn-ghost">Confirmar e-mail</button></form><?php endif; ?>
                             </div>
                         <?php endif; ?>
                         <details class="user-edit"><summary>Editar dados</summary>

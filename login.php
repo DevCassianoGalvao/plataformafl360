@@ -41,11 +41,6 @@ if (is_post()) {
         redirect('login.php');
     }
 
-    if (empty($user['email_verificado_em'])) {
-        flash('info', 'Confirme seu e-mail pelo link recebido. Depois, aguarde a aprovação do administrador.');
-        redirect('login.php');
-    }
-
     record_login_attempt($pdo, $email, $ip, true);
 
     login_user($user);

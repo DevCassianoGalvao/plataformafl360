@@ -15,8 +15,9 @@ if (is_post()) {
     $senha = (string) ($_POST['senha'] ?? '');
     $senha2 = (string) ($_POST['senha2'] ?? '');
     $errors = [];
+    $nameLength = function_exists('mb_strlen') ? mb_strlen($nome) : strlen($nome);
 
-    if (mb_strlen($nome) < 3 || mb_strlen($nome) > 150) {
+    if ($nameLength < 3 || $nameLength > 150) {
         $errors[] = 'Informe seu nome completo.';
     }
     if (!email_has_valid_domain($email)) {
@@ -39,22 +40,19 @@ if (is_post()) {
 
     if (!$errors) {
         try {
-            $token = bin2hex(random_bytes(32));
             $stmt = $pdo->prepare(
                 "INSERT INTO users
-                 (nome, email, senha, role, status, email_verification_hash, email_verification_expires, criado_em)
-                 VALUES (:nome, :email, :senha, 'aluno', 'pendente', :token_hash, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())"
+                 (nome, email, senha, role, status, criado_em)
+                 VALUES (:nome, :email, :senha, 'aluno', 'pendente', NOW())"
             );
             $stmt->execute([
                 ':nome' => $nome,
                 ':email' => $email,
                 ':senha' => password_hash($senha, PASSWORD_DEFAULT),
-                ':token_hash' => hash('sha256', $token),
             ]);
 
-            $confirmation = send_verification_email($email, $nome, $token) ? 'email' : 'manual';
-            redirect('register.php?enviado=1&confirmacao=' . $confirmation);
-        } catch (PDOException $exception) {
+            redirect('register.php?enviado=1');
+        } catch (Throwable $exception) {
             error_log('Falha no autocadastro FL360. Código: ' . $exception->getCode());
             $errors[] = 'Não foi possível concluir o cadastro agora. Tente novamente em alguns minutos.';
         }
@@ -67,7 +65,6 @@ if (is_post()) {
 $page_title = 'Criar conta';
 require_once __DIR__ . '/includes/header.php';
 $registrationSent = ($_GET['enviado'] ?? '') === '1';
-$emailSent = ($_GET['confirmacao'] ?? '') === 'email';
 ?>
 <main class="auth-page">
     <section class="auth-brand" aria-label="Programa Friburgo Líder 360">
@@ -75,7 +72,7 @@ $emailSent = ($_GET['confirmacao'] ?? '') === 'email';
         <div>
             <span class="eyebrow">Formação cidadã</span>
             <h1>Seu próximo passo começa aqui.</h1>
-            <p>Crie sua conta. Por segurança, o e-mail será confirmado e o acesso será aprovado pela equipe FL360.</p>
+            <p>Crie sua conta. Por segurança, o acesso será analisado e aprovado pela equipe FL360.</p>
         </div>
     </section>
 
@@ -86,11 +83,7 @@ $emailSent = ($_GET['confirmacao'] ?? '') === 'email';
                     <span class="confirmation-mark" aria-hidden="true">OK</span>
                     <span class="eyebrow">Cadastro enviado</span>
                     <h2>Agora aguarde a aprovação</h2>
-                    <?php if ($emailSent): ?>
-                        <p>Confira seu e-mail e abra o link de confirmação. Depois, aguarde a aprovação do administrador.</p>
-                    <?php else: ?>
-                        <p>Seu cadastro foi recebido. A equipe FL360 fará a confirmação e analisará sua entrada.</p>
-                    <?php endif; ?>
+                    <p>Seu cadastro foi recebido. Aguarde a equipe FL360 analisar e aprovar sua entrada.</p>
                     <ol class="confirmation-steps">
                         <li>Cadastro recebido pela plataforma.</li>
                         <li>Administrador analisa e aprova o acesso.</li>

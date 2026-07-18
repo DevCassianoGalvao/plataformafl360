@@ -83,7 +83,7 @@ function current_user(PDO $pdo): ?array
     $stmt->execute([':id' => (int) $_SESSION['user_id']]);
     $user = $stmt->fetch();
 
-    if (!$user || ($user['status'] ?? 'ativo') !== 'ativo' || empty($user['email_verificado_em'])) {
+    if (!$user || ($user['status'] ?? 'ativo') !== 'ativo') {
         logout_user();
         return null;
     }
@@ -228,19 +228,6 @@ function absolute_url(string $path): string
     $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
     $host = (string) ($_SERVER['HTTP_HOST'] ?? 'www.maicongoncalves.com.br');
     return ($https ? 'https://' : 'http://') . $host . url($path);
-}
-
-function send_verification_email(string $email, string $name, string $token): bool
-{
-    $verificationUrl = absolute_url('verificar-email.php?token=' . rawurlencode($token));
-    $subject = 'Confirme seu e-mail - FL360';
-    $message = "Olá, {$name}!\n\nConfirme seu e-mail para concluir seu cadastro no Portal FL360:\n{$verificationUrl}\n\nO link expira em 24 horas. Depois da confirmação, o acesso ainda será analisado pela administração.";
-    $headers = [
-        'From: Portal FL360 <no-reply@maicongoncalves.com.br>',
-        'Content-Type: text/plain; charset=UTF-8',
-    ];
-
-    return @mail($email, $subject, $message, implode("\r\n", $headers));
 }
 
 function login_is_rate_limited(PDO $pdo, string $email, string $ip): bool
