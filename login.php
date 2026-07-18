@@ -23,17 +23,30 @@ if (is_post()) {
     $stmt->execute([':email' => $email]);
     $user = $stmt->fetch();
 
-    $valid = $user
-        && password_verify($senha, (string) $user['senha'])
-        && ($user['status'] ?? 'ativo') === 'ativo'
-        && !empty($user['email_verificado_em']);
+    $credentialsValid = $user && password_verify($senha, (string) $user['senha']);
 
-    record_login_attempt($pdo, $email, $ip, (bool) $valid);
-
-    if (!$valid) {
-        flash('error', 'Não foi possível entrar. Confira os dados ou aguarde a aprovação da sua conta.');
+    if (!$credentialsValid) {
+        record_login_attempt($pdo, $email, $ip, false);
+        flash('error', 'E-mail ou senha incorretos. Confira os dados e tente novamente.');
         redirect('login.php');
     }
+
+    if (($user['status'] ?? 'ativo') === 'pendente') {
+        flash('info', 'Cadastro recebido. Aguarde a aprovação do administrador. Depois, volte ao login para acessar.');
+        redirect('login.php');
+    }
+
+    if (($user['status'] ?? 'ativo') === 'rejeitado') {
+        flash('error', 'Este cadastro não foi aprovado. Entre em contato com a equipe FL360.');
+        redirect('login.php');
+    }
+
+    if (empty($user['email_verificado_em'])) {
+        flash('info', 'Confirme seu e-mail pelo link recebido. Depois, aguarde a aprovação do administrador.');
+        redirect('login.php');
+    }
+
+    record_login_attempt($pdo, $email, $ip, true);
 
     login_user($user);
     redirect_to_role_home();

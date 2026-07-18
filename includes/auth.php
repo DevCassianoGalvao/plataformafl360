@@ -218,16 +218,9 @@ function password_validation_error(string $password): ?string
 
 function email_has_valid_domain(string $email): bool
 {
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        return false;
-    }
-
-    $domain = substr(strrchr($email, '@') ?: '', 1);
-    if ($domain === '' || !function_exists('checkdnsrr')) {
-        return true;
-    }
-
-    return checkdnsrr($domain, 'MX') || checkdnsrr($domain, 'A');
+    // Confirmação por link prova o acesso ao endereço. DNS síncrono pode falhar
+    // temporariamente no cPanel e não deve impedir um cadastro válido.
+    return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
 }
 
 function absolute_url(string $path): string

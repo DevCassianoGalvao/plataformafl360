@@ -20,7 +20,7 @@ if (is_post()) {
         $errors[] = 'Informe seu nome completo.';
     }
     if (!email_has_valid_domain($email)) {
-        $errors[] = 'Informe um e-mail válido, de um domínio que possa receber mensagens.';
+        $errors[] = 'Informe um e-mail válido.';
     }
     if ($passwordError = password_validation_error($senha)) {
         $errors[] = $passwordError;
@@ -33,30 +33,31 @@ if (is_post()) {
         $stmt = $pdo->prepare('SELECT id FROM users WHERE email = :email LIMIT 1');
         $stmt->execute([':email' => $email]);
         if ($stmt->fetchColumn()) {
-            $errors[] = 'Não foi possível concluir o cadastro com esses dados.';
+            $errors[] = 'Não foi possível criar outro cadastro com esses dados. Se você já enviou sua solicitação, aguarde a aprovação e depois vá para o login.';
         }
     }
 
     if (!$errors) {
-        $token = bin2hex(random_bytes(32));
-        $stmt = $pdo->prepare(
-            "INSERT INTO users
-             (nome, email, senha, role, status, email_verification_hash, email_verification_expires, criado_em)
-             VALUES (:nome, :email, :senha, 'aluno', 'pendente', :token_hash, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())"
-        );
-        $stmt->execute([
-            ':nome' => $nome,
-            ':email' => $email,
-            ':senha' => password_hash($senha, PASSWORD_DEFAULT),
-            ':token_hash' => hash('sha256', $token),
-        ]);
+        try {
+            $token = bin2hex(random_bytes(32));
+            $stmt = $pdo->prepare(
+                "INSERT INTO users
+                 (nome, email, senha, role, status, email_verification_hash, email_verification_expires, criado_em)
+                 VALUES (:nome, :email, :senha, 'aluno', 'pendente', :token_hash, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())"
+            );
+            $stmt->execute([
+                ':nome' => $nome,
+                ':email' => $email,
+                ':senha' => password_hash($senha, PASSWORD_DEFAULT),
+                ':token_hash' => hash('sha256', $token),
+            ]);
 
-        if (send_verification_email($email, $nome, $token)) {
-            flash('success', 'Cadastro recebido. Confira seu e-mail e aguarde a aprovação da administração.');
-        } else {
-            flash('success', 'Cadastro recebido. O servidor não enviou a confirmação; a administração poderá validar e aprovar sua conta manualmente.');
+            $confirmation = send_verification_email($email, $nome, $token) ? 'email' : 'manual';
+            redirect('register.php?enviado=1&confirmacao=' . $confirmation);
+        } catch (PDOException $exception) {
+            error_log('Falha no autocadastro FL360. Código: ' . $exception->getCode());
+            $errors[] = 'Não foi possível concluir o cadastro agora. Tente novamente em alguns minutos.';
         }
-        redirect('login.php');
     }
 
     flash('error', implode(' ', $errors));
@@ -65,6 +66,8 @@ if (is_post()) {
 
 $page_title = 'Criar conta';
 require_once __DIR__ . '/includes/header.php';
+$registrationSent = ($_GET['enviado'] ?? '') === '1';
+$emailSent = ($_GET['confirmacao'] ?? '') === 'email';
 ?>
 <main class="auth-page">
     <section class="auth-brand" aria-label="Programa Friburgo Líder 360">
@@ -78,12 +81,30 @@ require_once __DIR__ . '/includes/header.php';
 
     <section class="auth-form-area">
         <div class="auth-card">
-            <a class="auth-back" href="<?= e(url('login.php')) ?>">Voltar ao login</a>
-            <span class="eyebrow">Novo aluno</span>
-            <h2>Criar conta</h2>
-            <p>Use um e-mail que você acessa e escolha uma frase-senha exclusiva.</p>
+            <?php if ($registrationSent): ?>
+                <div class="auth-confirmation" role="status">
+                    <span class="confirmation-mark" aria-hidden="true">OK</span>
+                    <span class="eyebrow">Cadastro enviado</span>
+                    <h2>Agora aguarde a aprovação</h2>
+                    <?php if ($emailSent): ?>
+                        <p>Confira seu e-mail e abra o link de confirmação. Depois, aguarde a aprovação do administrador.</p>
+                    <?php else: ?>
+                        <p>Seu cadastro foi recebido. A equipe FL360 fará a confirmação e analisará sua entrada.</p>
+                    <?php endif; ?>
+                    <ol class="confirmation-steps">
+                        <li>Cadastro recebido pela plataforma.</li>
+                        <li>Administrador analisa e aprova o acesso.</li>
+                        <li>Depois da aprovação, volte ao login.</li>
+                    </ol>
+                    <a class="btn btn-primary btn-block" href="<?= e(url('login.php')) ?>">Ir para o login</a>
+                </div>
+            <?php else: ?>
+                <a class="auth-back" href="<?= e(url('login.php')) ?>">Voltar ao login</a>
+                <span class="eyebrow">Novo aluno</span>
+                <h2>Criar conta</h2>
+                <p>Use um e-mail que você acessa e escolha uma frase-senha exclusiva.</p>
 
-            <form method="post" class="form-grid auth-form" novalidate>
+                <form method="post" class="form-grid auth-form">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <label for="nome">Nome completo</label>
                 <input id="nome" type="text" name="nome" maxlength="150" required autocomplete="name" placeholder="Seu nome completo">
@@ -95,7 +116,8 @@ require_once __DIR__ . '/includes/header.php';
                 <label for="senha2">Confirmar senha</label>
                 <input id="senha2" type="password" name="senha2" minlength="12" maxlength="72" required autocomplete="new-password" placeholder="Repita a senha">
                 <button type="submit" class="btn btn-primary btn-block">Enviar cadastro</button>
-            </form>
+                </form>
+            <?php endif; ?>
         </div>
     </section>
 </main>
