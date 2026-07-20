@@ -1533,6 +1533,112 @@ img {
     font-weight: 600;
 }
 
+.quiz-options-builder {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card-soft);
+}
+
+.quiz-options-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.quiz-options-heading strong,
+.quiz-options-heading small {
+    display: block;
+}
+
+.quiz-options-heading small {
+    margin-top: .2rem;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+.quiz-option-rows {
+    display: grid;
+    gap: .7rem;
+}
+
+.quiz-option-editor {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: .65rem;
+    align-items: end;
+    padding: .8rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+}
+
+.quiz-option-text {
+    display: grid;
+    gap: .35rem;
+}
+
+.quiz-option-text > span {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.quiz-correct-choice {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    min-height: 42px;
+    padding: 0 .8rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.quiz-correct-choice:has(input:checked) {
+    border-color: var(--primary);
+    background: rgba(21, 147, 168, .1);
+    color: var(--primary);
+}
+
+.quiz-remove-option {
+    min-height: 42px;
+    padding: 0 .8rem;
+    border: 1px solid rgba(215, 58, 73, .28);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--danger);
+    cursor: pointer;
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.quiz-remove-option:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+    .quiz-options-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .quiz-option-editor {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .quiz-option-text {
+        grid-column: 1 / -1;
+    }
+}
+
 .radio-label {
     display: flex;
     align-items: center;

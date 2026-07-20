@@ -79,13 +79,14 @@ if (is_post()) {
         $quizId     = (int)    ($_POST['quiz_id']     ?? 0);
         $questionId = (int)    ($_POST['question_id'] ?? 0);
         $pergunta   = trim((string) ($_POST['pergunta']   ?? ''));
-        $correta    = (string) ($_POST['correta']    ?? 'a');
-        $opts = [
-            'a' => trim((string) ($_POST['opt_a'] ?? '')),
-            'b' => trim((string) ($_POST['opt_b'] ?? '')),
-            'c' => trim((string) ($_POST['opt_c'] ?? '')),
-            'd' => trim((string) ($_POST['opt_d'] ?? '')),
-        ];
+        $correctIndex = filter_var($_POST['correct_index'] ?? null, FILTER_VALIDATE_INT);
+        $submittedOptions = $_POST['options'] ?? [];
+        $opts = is_array($submittedOptions)
+            ? array_values(array_map(
+                static fn ($option): string => is_scalar($option) ? trim((string) $option) : '',
+                $submittedOptions
+            ))
+            : [];
 
         $stmt = $pdo->prepare('SELECT module_id FROM quizzes WHERE id = :id LIMIT 1');
         $stmt->execute([':id' => $quizId]);
@@ -96,8 +97,17 @@ if (is_post()) {
             exit('Você não tem permissão para alterar este quiz.');
         }
 
-        if ($pergunta === '' || in_array('', $opts, true) || !in_array($correta, ['a','b','c','d'], true)) {
-            flash('error', 'Preencha a pergunta, todas as 4 opções e marque a correta.');
+        $optionCount = count($opts);
+        if (
+            $pergunta === ''
+            || $optionCount < 2
+            || $optionCount > 20
+            || in_array('', $opts, true)
+            || $correctIndex === false
+            || $correctIndex < 0
+            || $correctIndex >= $optionCount
+        ) {
+            flash('error', 'Informe de 2 a 20 opções preenchidas e marque uma delas como correta.');
             redirect($quizPath . '?module_id=' . $mId);
         }
 
@@ -118,9 +128,9 @@ if (is_post()) {
                 $questionId = (int) $pdo->lastInsertId();
             }
 
-            foreach (['a', 'b', 'c', 'd'] as $letter) {
+            foreach ($opts as $index => $optionText) {
                 $pdo->prepare('INSERT INTO quiz_options (question_id, texto, correta) VALUES (:qid, :t, :c)')
-                    ->execute([':qid' => $questionId, ':t' => $opts[$letter], ':c' => ($correta === $letter ? 1 : 0)]);
+                    ->execute([':qid' => $questionId, ':t' => $optionText, ':c' => ($correctIndex === $index ? 1 : 0)]);
             }
 
             $pdo->commit();
@@ -353,35 +363,42 @@ if ($moduleId > 0) {
                         <textarea id="pergunta" name="pergunta" rows="2" required><?= $editQuestion ? e($editQuestion['pergunta']) : '' ?></textarea>
 
                         <?php
-                        $letters = ['a', 'b', 'c', 'd'];
-                        $correctLetter = 'a';
-                        $optTexts = ['a' => '', 'b' => '', 'c' => '', 'd' => ''];
+                        $correctIndex = 0;
+                        $optTexts = ['', ''];
                         if ($editQuestion && !empty($editQuestion['options'])) {
-                            foreach ($editQuestion['options'] as $li => $opt) {
-                                $letter = $letters[$li] ?? 'a';
-                                $optTexts[$letter] = (string) $opt['texto'];
+                            $optTexts = [];
+                            foreach ($editQuestion['options'] as $index => $opt) {
+                                $optTexts[] = (string) $opt['texto'];
                                 if ((int) $opt['correta'] === 1) {
-                                    $correctLetter = $letter;
+                                    $correctIndex = $index;
                                 }
                             }
                         }
+                        while (count($optTexts) < 2) {
+                            $optTexts[] = '';
+                        }
                         ?>
 
-                        <?php foreach ($letters as $letter): ?>
-                            <label for="opt_<?= $letter ?>">Opção <?= strtoupper($letter) ?></label>
-                            <input id="opt_<?= $letter ?>" type="text" name="opt_<?= $letter ?>"
-                                   value="<?= e($optTexts[$letter]) ?>" required>
-                        <?php endforeach; ?>
-
-                        <label>Opção correta</label>
-                        <div class="inline-form wrap">
-                            <?php foreach ($letters as $letter): ?>
-                                <label class="radio-label">
-                                    <input type="radio" name="correta" value="<?= $letter ?>"
-                                        <?= $correctLetter === $letter ? 'checked' : '' ?> required>
-                                    <?= strtoupper($letter) ?>
-                                </label>
-                            <?php endforeach; ?>
+                        <div class="quiz-options-builder" id="quizOptionsBuilder" data-min="2" data-max="20">
+                            <div class="quiz-options-heading">
+                                <div><strong>Alternativas</strong><small>Adicione quantas precisar e marque a resposta correta.</small></div>
+                                <button type="button" class="btn btn-ghost" id="addQuizOption">Adicionar opção</button>
+                            </div>
+                            <div class="quiz-option-rows" id="quizOptionRows">
+                                <?php foreach ($optTexts as $index => $optionText): ?>
+                                    <div class="quiz-option-editor">
+                                        <label class="quiz-option-text">
+                                            <span>Opção <strong data-option-letter><?= chr(65 + $index) ?></strong></span>
+                                            <input type="text" name="options[]" value="<?= e($optionText) ?>" maxlength="500" required>
+                                        </label>
+                                        <label class="quiz-correct-choice">
+                                            <input type="radio" name="correct_index" value="<?= $index ?>" <?= $correctIndex === $index ? 'checked' : '' ?> required>
+                                            <span>Correta</span>
+                                        </label>
+                                        <button type="button" class="quiz-remove-option" data-remove-option aria-label="Remover esta opção">Remover</button>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
 
                         <button type="submit" class="btn btn-primary">
@@ -389,6 +406,62 @@ if ($moduleId > 0) {
                         </button>
                     </form>
                 </section>
+                <script>
+                (() => {
+                    const builder = document.getElementById('quizOptionsBuilder');
+                    if (!builder) return;
+
+                    const rows = document.getElementById('quizOptionRows');
+                    const addButton = document.getElementById('addQuizOption');
+                    const min = Number(builder.dataset.min || 2);
+                    const max = Number(builder.dataset.max || 20);
+
+                    function updateRows() {
+                        const items = [...rows.querySelectorAll('.quiz-option-editor')];
+                        items.forEach((item, index) => {
+                            item.querySelector('[data-option-letter]').textContent = String.fromCharCode(65 + index);
+                            item.querySelector('input[type="radio"]').value = String(index);
+                            item.querySelector('[data-remove-option]').disabled = items.length <= min;
+                        });
+                        addButton.disabled = items.length >= max;
+                    }
+
+                    function addOption() {
+                        if (rows.children.length >= max) return;
+                        const item = document.createElement('div');
+                        item.className = 'quiz-option-editor';
+                        item.innerHTML = `
+                            <label class="quiz-option-text">
+                                <span>Opção <strong data-option-letter></strong></span>
+                                <input type="text" name="options[]" maxlength="500" required>
+                            </label>
+                            <label class="quiz-correct-choice">
+                                <input type="radio" name="correct_index" required>
+                                <span>Correta</span>
+                            </label>
+                            <button type="button" class="quiz-remove-option" data-remove-option aria-label="Remover esta opção">Remover</button>`;
+                        rows.appendChild(item);
+                        updateRows();
+                        item.querySelector('input[type="text"]').focus();
+                    }
+
+                    addButton.addEventListener('click', addOption);
+                    rows.addEventListener('click', (event) => {
+                        const removeButton = event.target.closest('[data-remove-option]');
+                        if (!removeButton || rows.children.length <= min) return;
+
+                        const item = removeButton.closest('.quiz-option-editor');
+                        const removedCorrect = item.querySelector('input[type="radio"]').checked;
+                        item.remove();
+                        if (removedCorrect && !rows.querySelector('input[type="radio"]:checked')) {
+                            rows.querySelector('input[type="radio"]').checked = true;
+                        }
+                        updateRows();
+                    });
+
+                    updateRows();
+                })();
+                </script>
 
                 <!-- ── Resultados dos alunos ──────────────────────────────── -->
                 <section class="panel">
