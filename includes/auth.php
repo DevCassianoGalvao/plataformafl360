@@ -346,6 +346,43 @@ function ensure_upload_dir(): string
     return $uploadDir;
 }
 
+function lesson_video_storage_dir(): string
+{
+    $videoDir = ensure_upload_dir() . DIRECTORY_SEPARATOR . 'videos';
+    if (!is_dir($videoDir)) {
+        mkdir($videoDir, 0755, true);
+    }
+    return $videoDir;
+}
+
+function is_local_lesson_video(string $value): bool
+{
+    return str_starts_with($value, 'local:');
+}
+
+function local_lesson_video_filename(string $value): string
+{
+    if (!is_local_lesson_video($value)) {
+        return '';
+    }
+
+    $filename = basename(substr($value, 6));
+    return preg_match('/^[a-f0-9]{32}\.(mp4|webm|m4v)$/', $filename) ? $filename : '';
+}
+
+function delete_local_lesson_video(string $value): void
+{
+    $filename = local_lesson_video_filename($value);
+    if ($filename === '') {
+        return;
+    }
+
+    $path = lesson_video_storage_dir() . DIRECTORY_SEPARATOR . $filename;
+    if (is_file($path) && !@unlink($path)) {
+        error_log('FL360: não foi possível excluir vídeo interno ' . $filename);
+    }
+}
+
 function db_table_exists(PDO $pdo, string $table): bool
 {
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :table');
@@ -414,7 +451,7 @@ function get_youtube_embed_url(string $rawUrl): string
         }
     }
 
-    return $url;
+    return '';
 }
 
 function module_progress_percent(PDO $pdo, int $userId, int $moduleId): int

@@ -82,7 +82,8 @@ $nextStmt->execute([
 ]);
 $nextId = (int) ($nextStmt->fetchColumn() ?: 0);
 
-$embedUrl = get_youtube_embed_url((string) $lesson['video_url']);
+$isLocalVideo = is_local_lesson_video((string) $lesson['video_url']);
+$embedUrl = $isLocalVideo ? '' : get_youtube_embed_url((string) $lesson['video_url']);
 
 $active_page = 'modulos';
 $page_title = 'Aula';
@@ -106,7 +107,12 @@ require_once __DIR__ . '/../includes/header.php';
             <p><?= e($lesson['descricao']) ?></p>
 
             <div class="video-wrapper">
-                <?php if ($embedUrl !== ''): ?>
+                <?php if ($isLocalVideo): ?>
+                    <video controls preload="metadata" playsinline controlslist="nodownload" disablepictureinpicture>
+                        <source src="<?= e(url('pages/video.php?id=' . $lessonId)) ?>">
+                        Seu navegador não conseguiu reproduzir este vídeo.
+                    </video>
+                <?php elseif ($embedUrl !== ''): ?>
                     <iframe
                         src="<?= e($embedUrl) ?>"
                         title="Vídeo da aula"
@@ -168,4 +174,3 @@ require_once __DIR__ . '/../includes/header.php';
     </main>
 </div>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
-

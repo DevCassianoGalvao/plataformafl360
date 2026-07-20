@@ -11,6 +11,8 @@
 # Uploads de usuários
 /uploads/*
 !/uploads/.gitkeep
+!/uploads/videos/
+!/uploads/videos/.htaccess
 
 # Logs
 *.log

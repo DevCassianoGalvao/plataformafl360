@@ -63,7 +63,13 @@ if (is_post()) {
     }
 
     if ($action === 'delete') {
+        $videoStmt = $pdo->prepare('SELECT video_url FROM lessons WHERE module_id = :module_id');
+        $videoStmt->execute([':module_id' => $id]);
+        $moduleVideos = $videoStmt->fetchAll(PDO::FETCH_COLUMN);
         $pdo->prepare('DELETE FROM modules WHERE id = :id')->execute([':id' => $id]);
+        foreach ($moduleVideos as $moduleVideo) {
+            delete_local_lesson_video((string) $moduleVideo);
+        }
         flash('success', 'Módulo excluído.');
         redirect($returnPath);
     }
