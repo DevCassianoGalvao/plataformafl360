@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/auth.php';
 require_admin();
 
-const PROFESSIONAL_SCHEMA_VERSION = '2026-07-colaboracao-seguranca';
+const PROFESSIONAL_SCHEMA_VERSION = '2026-07-quiz-respostas-abertas';
 
 function db_index_exists(PDO $pdo, string $table, string $index): bool
 {
@@ -68,6 +68,10 @@ if (is_post()) {
             );
         }
 
+        if (!db_column_exists($pdo, 'quiz_questions', 'tipo')) {
+            $pdo->exec("ALTER TABLE quiz_questions ADD COLUMN tipo ENUM('multipla_escolha','texto') NOT NULL DEFAULT 'multipla_escolha' AFTER pergunta");
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO schema_migrations (versao, executado_em) VALUES (:versao, NOW())
              ON DUPLICATE KEY UPDATE executado_em = VALUES(executado_em)'
@@ -88,6 +92,7 @@ $ready = db_column_exists($pdo, 'modules', 'professor_id')
     && db_table_exists($pdo, 'module_professors')
     && db_column_exists($pdo, 'users', 'status')
     && db_column_exists($pdo, 'quizzes', 'liberacao')
+    && db_column_exists($pdo, 'quiz_questions', 'tipo')
     && db_column_exists($pdo, 'forum_topics', 'fixado');
 
 $active_page = 'migracoes';
@@ -100,7 +105,7 @@ require_once __DIR__ . '/../includes/header.php';
         <section class="panel panel-narrow">
             <span class="eyebrow">Manutenção segura</span>
             <h1>Atualização do banco</h1>
-            <p>Esta atualização adiciona colaboração entre professores, aprovação de cadastros, regras de quiz e moderação. Nenhum usuário, módulo, aula ou progresso existente será removido.</p>
+            <p>Esta atualização preserva os dados existentes e adiciona suporte seguro a perguntas abertas nos quizzes.</p>
             <div class="migration-status <?= $ready ? 'is-ready' : 'is-pending' ?>">
                 <strong><?= $ready ? 'Banco atualizado' : 'Atualização pendente' ?></strong>
                 <span><?= $ready ? 'A estrutura profissional já está disponível.' : 'Faça um backup no cPanel antes de continuar.' ?></span>

@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
     id      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     quiz_id INT UNSIGNED NOT NULL,
     pergunta TEXT NOT NULL,
+    tipo ENUM('multipla_escolha','texto') NOT NULL DEFAULT 'multipla_escolha',
     ordem   INT NOT NULL DEFAULT 0,
     KEY idx_quiz_questions_quiz (quiz_id),
     CONSTRAINT fk_quiz_questions_quiz

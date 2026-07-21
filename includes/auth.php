@@ -638,6 +638,7 @@ function ensure_schema_updates(PDO $pdo): void
                 id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 quiz_id INT UNSIGNED NOT NULL,
                 pergunta TEXT NOT NULL,
+                tipo ENUM(\'multipla_escolha\',\'texto\') NOT NULL DEFAULT \'multipla_escolha\',
                 ordem INT NOT NULL DEFAULT 0,
                 KEY idx_quiz_questions_quiz (quiz_id),
                 CONSTRAINT fk_quiz_questions_quiz
@@ -645,6 +646,9 @@ function ensure_schema_updates(PDO $pdo): void
                     ON DELETE CASCADE ON UPDATE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+        if (!db_column_exists($pdo, 'quiz_questions', 'tipo')) {
+            $pdo->exec("ALTER TABLE quiz_questions ADD COLUMN tipo ENUM('multipla_escolha','texto') NOT NULL DEFAULT 'multipla_escolha' AFTER pergunta");
+        }
 
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS quiz_options (

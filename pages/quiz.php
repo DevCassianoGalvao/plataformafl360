@@ -41,8 +41,11 @@ if ($quiz['liberacao'] === 'apos_aulas' && module_progress_percent($pdo, $userId
 $quizId = (int) $quiz['id'];
 
 // ─── Load questions + options ──────────────────────────────────────────────────
+$questionTypeSelect = db_column_exists($pdo, 'quiz_questions', 'tipo')
+    ? 'tipo'
+    : "'multipla_escolha' AS tipo";
 $qsStmt = $pdo->prepare(
-    'SELECT id, pergunta, ordem FROM quiz_questions WHERE quiz_id = :qid ORDER BY ordem ASC, id ASC'
+    "SELECT id, pergunta, {$questionTypeSelect}, ordem FROM quiz_questions WHERE quiz_id = :qid ORDER BY ordem ASC, id ASC"
 );
 $qsStmt->execute([':qid' => $quizId]);
 $questions = $qsStmt->fetchAll();
@@ -54,7 +57,7 @@ if (!$questions) {
 
 foreach ($questions as &$question) {
     $opStmt = $pdo->prepare(
-        'SELECT id, texto FROM quiz_options WHERE question_id = :qid ORDER BY id ASC'
+        'SELECT id, texto, correta FROM quiz_options WHERE question_id = :qid ORDER BY id ASC'
     );
     $opStmt->execute([':qid' => (int) $question['id']]);
     $question['options'] = $opStmt->fetchAll();
@@ -66,24 +69,46 @@ if (is_post()) {
     require_csrf_token($_POST['csrf_token'] ?? null);
 
     $submitted = $_POST['answer'] ?? [];
+    $submittedTexts = $_POST['text_answer'] ?? [];
     $acertos   = 0;
-    $total     = count($questions);
+    $total     = 0;
     $respostas = [];
 
     foreach ($questions as $question) {
-        $qid        = (int) $question['id'];
+        $qid = (int) $question['id'];
+
+        if ($question['tipo'] === 'texto') {
+            $rawText = is_array($submittedTexts) ? ($submittedTexts[$qid] ?? '') : '';
+            $textAnswer = is_scalar($rawText) ? trim((string) $rawText) : '';
+            $textLength = function_exists('mb_strlen') ? mb_strlen($textAnswer) : strlen($textAnswer);
+            if ($textAnswer === '' || $textLength > 4000) {
+                flash('error', 'Preencha as respostas abertas com até 4.000 caracteres.');
+                redirect('pages/quiz.php?module_id=' . $moduleId);
+            }
+            $respostas[$qid] = $textAnswer;
+            continue;
+        }
+
+        $total++;
         $selectedId = isset($submitted[$qid]) ? (int) $submitted[$qid] : 0;
         $respostas[$qid] = $selectedId;
 
-        if ($selectedId > 0) {
-            $chkStmt = $pdo->prepare(
-                'SELECT correta FROM quiz_options WHERE id = :id AND question_id = :qid LIMIT 1'
-            );
-            $chkStmt->execute([':id' => $selectedId, ':qid' => $qid]);
-            $correta = (int) ($chkStmt->fetchColumn() ?: 0);
-            if ($correta === 1) {
-                $acertos++;
-            }
+        if ($selectedId <= 0) {
+            flash('error', 'Responda todas as questões antes de finalizar o quiz.');
+            redirect('pages/quiz.php?module_id=' . $moduleId);
+        }
+
+        $chkStmt = $pdo->prepare(
+            'SELECT correta FROM quiz_options WHERE id = :id AND question_id = :qid LIMIT 1'
+        );
+        $chkStmt->execute([':id' => $selectedId, ':qid' => $qid]);
+        $selectedOption = $chkStmt->fetchColumn();
+        if ($selectedOption === false) {
+            flash('error', 'Uma das respostas selecionadas é inválida. Tente novamente.');
+            redirect('pages/quiz.php?module_id=' . $moduleId);
+        }
+        if ((int) $selectedOption === 1) {
+            $acertos++;
         }
     }
 
@@ -99,7 +124,7 @@ if (is_post()) {
         ':acertos'  => $acertos,
         ':total'    => $total,
         ':nota'     => $nota,
-        ':respostas' => json_encode($respostas),
+        ':respostas' => json_encode($respostas, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE),
     ]);
 
     $newAttemptId = (int) $pdo->lastInsertId();
@@ -124,7 +149,21 @@ if ($attemptId > 0) {
         $respostas = json_decode((string) ($attempt['respostas'] ?? '{}'), true) ?: [];
 
         foreach ($questions as $question) {
-            $qid        = (int) $question['id'];
+            $qid = (int) $question['id'];
+
+            if ($question['tipo'] === 'texto') {
+                $resultData[] = [
+                    'type' => 'texto',
+                    'question' => $question['pergunta'],
+                    'text_answer' => (string) ($respostas[$qid] ?? ''),
+                    'options' => [],
+                    'selected_id' => 0,
+                    'correct_id' => 0,
+                    'is_correct' => null,
+                ];
+                continue;
+            }
+
             $selectedId = (int) ($respostas[$qid] ?? 0);
 
             $allOptsStmt = $pdo->prepare(
@@ -141,6 +180,7 @@ if ($attemptId > 0) {
             }
 
             $resultData[] = [
+                'type'        => 'multipla_escolha',
                 'question'    => $question['pergunta'],
                 'options'     => $allOpts,
                 'selected_id' => $selectedId,
@@ -164,13 +204,16 @@ require_once __DIR__ . '/../includes/header.php';
         <?php if ($attempt): ?>
         <!-- ════════════════════════ RESULTADO ════════════════════════ -->
         <?php
-            $nota      = (int) $attempt['nota'];
-            $pass      = $nota >= 60;
-            $emoji     = $pass ? '🎉' : '📚';
-            $headline  = $pass ? 'Parabéns, você foi bem!' : 'Continue estudando!';
-            $sub       = $pass
-                ? 'Você demonstrou domínio do conteúdo deste módulo.'
-                : 'Revise o material e tente novamente para melhorar sua nota.';
+            $nota = (int) $attempt['nota'];
+            $hasObjectiveQuestions = (int) $attempt['total'] > 0;
+            $pass = $hasObjectiveQuestions && $nota >= 60;
+            $emoji = !$hasObjectiveQuestions ? '✓' : ($pass ? '🎉' : '📚');
+            $headline = !$hasObjectiveQuestions ? 'Respostas enviadas!' : ($pass ? 'Parabéns, você foi bem!' : 'Continue estudando!');
+            $sub = !$hasObjectiveQuestions
+                ? 'Suas respostas abertas foram registradas para análise do professor.'
+                : ($pass
+                    ? 'Você demonstrou domínio do conteúdo deste módulo.'
+                    : 'Revise o material e tente novamente para melhorar sua nota.');
         ?>
         <div class="qr-page">
             <a class="qr-back" href="<?= e(url('pages/modulos.php')) ?>">
@@ -182,6 +225,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <h1 class="qr-headline"><?= $headline ?></h1>
                 <p class="qr-sub"><?= $sub ?></p>
 
+                <?php if ($hasObjectiveQuestions): ?>
                 <div class="qr-ring <?= $pass ? 'qr-ring-pass' : 'qr-ring-fail' ?>">
                     <svg viewBox="0 0 120 120" class="qr-ring-svg">
                         <circle cx="60" cy="60" r="52" class="qr-ring-track"/>
@@ -193,6 +237,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <span class="qr-ring-lbl"><?= e((string) $attempt['acertos']) ?>/<?= e((string) $attempt['total']) ?></span>
                     </div>
                 </div>
+                <?php endif; ?>
 
                 <div class="qr-actions">
                     <a class="btn btn-primary btn-lg"
@@ -211,13 +256,16 @@ require_once __DIR__ . '/../includes/header.php';
                 <h2 class="qr-review-title">Revisão das respostas</h2>
 
                 <?php foreach ($resultData as $i => $rd): ?>
-                    <div class="qr-review-card <?= $rd['is_correct'] ? 'qrr-correct' : 'qrr-wrong' ?>">
+                    <div class="qr-review-card <?= $rd['type'] === 'texto' ? 'qrr-open' : ($rd['is_correct'] ? 'qrr-correct' : 'qrr-wrong') ?>">
                         <div class="qrr-badge">
-                            <?= $rd['is_correct'] ? '✓' : '✗' ?>
+                            <?= $rd['type'] === 'texto' ? 'T' : ($rd['is_correct'] ? '✓' : '✗') ?>
                         </div>
                         <div class="qrr-body">
                             <p class="qrr-num">Questão <?= ($i + 1) ?></p>
                             <p class="qrr-text"><?= e($rd['question']) ?></p>
+                            <?php if ($rd['type'] === 'texto'): ?>
+                                <div class="qrr-open-answer"><?= nl2br(e($rd['text_answer'])) ?></div>
+                            <?php else: ?>
                             <ul class="qrr-options">
                                 <?php foreach ($rd['options'] as $li => $opt): ?>
                                     <?php
@@ -239,6 +287,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     </li>
                                 <?php endforeach; ?>
                             </ul>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -270,26 +319,36 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="qz-stage" id="qzStage">
                     <?php foreach ($questions as $i => $question): ?>
                         <div class="qz-question <?= $i === 0 ? 'qz-active' : '' ?>"
-                             data-index="<?= $i ?>">
+                             data-index="<?= $i ?>" data-type="<?= e($question['tipo']) ?>">
 
                             <div class="qz-question-header">
-                                <span class="qz-q-tag"><?= $module['titulo'] ?></span>
+                                <span class="qz-q-tag"><?= e($module['titulo']) ?></span>
                             </div>
 
                             <h2 class="qz-question-text"><?= e($question['pergunta']) ?></h2>
 
-                            <div class="qz-options" role="radiogroup">
+                            <?php if ($question['tipo'] === 'texto'): ?>
+                                <label class="qz-text-answer">
+                                    <span>Sua resposta</span>
+                                    <textarea name="text_answer[<?= (int) $question['id'] ?>]" rows="7" maxlength="4000" placeholder="Escreva sua opinião ou comentário..." required></textarea>
+                                    <small>Até 4.000 caracteres. Esta resposta será enviada ao professor.</small>
+                                </label>
+                            <?php else: ?>
+                            <div class="qz-options" role="radiogroup" aria-label="Alternativas da questão">
                                 <?php foreach ($question['options'] as $li => $opt): ?>
                                     <label class="qz-option" tabindex="0">
                                         <input type="radio"
                                                name="answer[<?= (int) $question['id'] ?>]"
-                                               value="<?= (int) $opt['id'] ?>">
+                                               value="<?= (int) $opt['id'] ?>"
+                                               data-correct="<?= (int) $opt['correta'] === 1 ? '1' : '0' ?>">
                                         <span class="qz-opt-letter"><?= chr(65 + $li) ?></span>
                                         <span class="qz-opt-text"><?= e($opt['texto']) ?></span>
                                         <span class="qz-opt-check">&#10003;</span>
                                     </label>
                                 <?php endforeach; ?>
                             </div>
+                            <?php endif; ?>
+                            <div class="qz-feedback" role="status" aria-live="polite"></div>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -303,8 +362,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <?php endfor; ?>
                     </div>
 
-                    <button type="button" class="btn btn-primary btn-lg qz-btn-next"
-                            id="qzNext" onclick="qzNext()">
+                    <button type="button" class="btn btn-primary btn-lg qz-btn-next" id="qzNext">
                         Próxima questão <span class="qz-arrow">&#8594;</span>
                     </button>
 
@@ -328,10 +386,39 @@ require_once __DIR__ . '/../includes/header.php';
             const btnNext   = document.getElementById('qzNext');
             const btnSubmit = document.getElementById('qzSubmit');
 
+            const form = document.getElementById('quizForm');
+            let advancing = false;
+
             function answered(index) {
-                const q   = questions[index];
-                const inp = q.querySelectorAll('input[type="radio"]');
-                return Array.from(inp).some(r => r.checked);
+                const question = questions[index];
+                if (question.dataset.type === 'texto') {
+                    return question.querySelector('textarea').value.trim().length > 0;
+                }
+                return Boolean(question.querySelector('input[type="radio"]:checked'));
+            }
+
+            function showFeedback(index) {
+                const question = questions[index];
+                const feedback = question.querySelector('.qz-feedback');
+
+                if (question.dataset.type === 'texto') {
+                    feedback.textContent = 'Resposta registrada para envio ao professor.';
+                    feedback.className = 'qz-feedback is-neutral';
+                    return;
+                }
+
+                const selected = question.querySelector('input[type="radio"]:checked');
+                const isCorrect = selected.dataset.correct === '1';
+                question.querySelectorAll('.qz-option').forEach((option) => {
+                    const input = option.querySelector('input');
+                    option.classList.toggle('is-correct', input.dataset.correct === '1');
+                    option.classList.toggle('is-wrong', input.checked && input.dataset.correct !== '1');
+                });
+                question.classList.add('is-reviewed');
+                feedback.textContent = isCorrect
+                    ? 'Resposta correta!'
+                    : 'Resposta incorreta. A alternativa correta está destacada.';
+                feedback.className = 'qz-feedback ' + (isCorrect ? 'is-correct' : 'is-wrong');
             }
 
             function goTo(index, direction) {
@@ -358,23 +445,51 @@ require_once __DIR__ . '/../includes/header.php';
                     d.classList.toggle('qz-dot-done',   i < current);
                 });
 
-                btnNext.style.display   = current < total - 1 ? '' : 'none';
-                btnSubmit.style.display = current === total - 1 ? '' : 'none';
+                btnNext.innerHTML = current < total - 1
+                    ? 'Próxima questão <span class="qz-arrow">&#8594;</span>'
+                    : 'Finalizar quiz <span class="qz-arrow">&#9654;</span>';
             }
 
-            window.qzNext = function () {
+            function nextQuestion() {
+                if (advancing) return;
                 if (!answered(current)) {
                     const q = questions[current];
                     q.classList.add('qz-shake');
+                    const feedback = q.querySelector('.qz-feedback');
+                    feedback.textContent = q.dataset.type === 'texto'
+                        ? 'Escreva uma resposta antes de continuar.'
+                        : 'Selecione uma alternativa antes de continuar.';
+                    feedback.className = 'qz-feedback is-warning';
                     setTimeout(() => q.classList.remove('qz-shake'), 500);
                     return;
                 }
-                if (current < total - 1) goTo(current + 1, 1);
-            };
+
+                advancing = true;
+                btnNext.disabled = true;
+                showFeedback(current);
+                setTimeout(() => {
+                    if (current < total - 1) {
+                        goTo(current + 1, 1);
+                        advancing = false;
+                        btnNext.disabled = false;
+                    } else {
+                        if (typeof form.requestSubmit === 'function') {
+                            form.requestSubmit(btnSubmit);
+                        } else {
+                            form.submit();
+                        }
+                    }
+                }, 900);
+            }
+
+            btnNext.addEventListener('click', nextQuestion);
 
             // keyboard support
             document.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && btnNext.style.display !== 'none') window.qzNext();
+                if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                    e.preventDefault();
+                    nextQuestion();
+                }
             });
 
             // clicking a label marks it visually
@@ -389,10 +504,12 @@ require_once __DIR__ . '/../includes/header.php';
             });
 
             // prevent submit without all answered
-            document.getElementById('quizForm').addEventListener('submit', function (e) {
+            form.addEventListener('submit', function (e) {
                 for (let i = 0; i < total; i++) {
                     if (!answered(i)) {
                         e.preventDefault();
+                        advancing = false;
+                        btnNext.disabled = false;
                         goTo(i, i > current ? 1 : -1);
                         return;
                     }

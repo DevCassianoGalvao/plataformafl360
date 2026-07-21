@@ -9,6 +9,11 @@ $managerId = (int) $manager['id'];
 $isAdmin = $manager['role'] === 'admin';
 $quizPath = content_manager_path('quiz.php');
 
+if (!db_column_exists($pdo, 'quiz_questions', 'tipo')) {
+    flash('error', 'A atualização segura do quiz precisa ser executada pelo administrador.');
+    redirect($isAdmin ? 'admin/migracoes.php' : 'professor/dashboard.php');
+}
+
 $moduleId      = isset($_GET['module_id'])    ? (int) $_GET['module_id']    : 0;
 $editQuestionId = isset($_GET['edit_question']) ? (int) $_GET['edit_question'] : 0;
 
@@ -79,6 +84,9 @@ if (is_post()) {
         $quizId     = (int)    ($_POST['quiz_id']     ?? 0);
         $questionId = (int)    ($_POST['question_id'] ?? 0);
         $pergunta   = trim((string) ($_POST['pergunta']   ?? ''));
+        $tipo = in_array(($_POST['tipo'] ?? ''), ['multipla_escolha', 'texto'], true)
+            ? (string) $_POST['tipo']
+            : 'multipla_escolha';
         $correctIndex = filter_var($_POST['correct_index'] ?? null, FILTER_VALIDATE_INT);
         $submittedOptions = $_POST['options'] ?? [];
         $opts = is_array($submittedOptions)
@@ -98,24 +106,36 @@ if (is_post()) {
         }
 
         $optionCount = count($opts);
-        if (
-            $pergunta === ''
-            || $optionCount < 2
+        $invalidOptions = $tipo === 'multipla_escolha' && (
+            $optionCount < 2
             || $optionCount > 20
             || in_array('', $opts, true)
             || $correctIndex === false
             || $correctIndex < 0
             || $correctIndex >= $optionCount
-        ) {
+        );
+        if ($pergunta === '') {
+            flash('error', 'Informe o enunciado da pergunta.');
+            redirect($quizPath . '?module_id=' . $mId);
+        }
+        if ($invalidOptions) {
             flash('error', 'Informe de 2 a 20 opções preenchidas e marque uma delas como correta.');
             redirect($quizPath . '?module_id=' . $mId);
+        }
+        if ($questionId > 0) {
+            $questionCheck = $pdo->prepare('SELECT COUNT(*) FROM quiz_questions WHERE id = :id AND quiz_id = :quiz_id');
+            $questionCheck->execute([':id' => $questionId, ':quiz_id' => $quizId]);
+            if ((int) $questionCheck->fetchColumn() !== 1) {
+                flash('error', 'Pergunta inválida para este quiz.');
+                redirect($quizPath . '?module_id=' . $mId);
+            }
         }
 
         $pdo->beginTransaction();
         try {
             if ($questionId > 0) {
-                $pdo->prepare('UPDATE quiz_questions SET pergunta = :p WHERE id = :id AND quiz_id = :qid')
-                    ->execute([':p' => $pergunta, ':id' => $questionId, ':qid' => $quizId]);
+                $pdo->prepare('UPDATE quiz_questions SET pergunta = :p, tipo = :tipo WHERE id = :id AND quiz_id = :qid')
+                    ->execute([':p' => $pergunta, ':tipo' => $tipo, ':id' => $questionId, ':qid' => $quizId]);
                 $pdo->prepare('DELETE FROM quiz_options WHERE question_id = :qid')
                     ->execute([':qid' => $questionId]);
             } else {
@@ -123,14 +143,16 @@ if (is_post()) {
                 $stmt->execute([':qid' => $quizId]);
                 $ordem = ((int) $stmt->fetchColumn()) + 1;
 
-                $pdo->prepare('INSERT INTO quiz_questions (quiz_id, pergunta, ordem) VALUES (:qid, :p, :o)')
-                    ->execute([':qid' => $quizId, ':p' => $pergunta, ':o' => $ordem]);
+                $pdo->prepare('INSERT INTO quiz_questions (quiz_id, pergunta, tipo, ordem) VALUES (:qid, :p, :tipo, :o)')
+                    ->execute([':qid' => $quizId, ':p' => $pergunta, ':tipo' => $tipo, ':o' => $ordem]);
                 $questionId = (int) $pdo->lastInsertId();
             }
 
-            foreach ($opts as $index => $optionText) {
-                $pdo->prepare('INSERT INTO quiz_options (question_id, texto, correta) VALUES (:qid, :t, :c)')
-                    ->execute([':qid' => $questionId, ':t' => $optionText, ':c' => ($correctIndex === $index ? 1 : 0)]);
+            if ($tipo === 'multipla_escolha') {
+                foreach ($opts as $index => $optionText) {
+                    $pdo->prepare('INSERT INTO quiz_options (question_id, texto, correta) VALUES (:qid, :t, :c)')
+                        ->execute([':qid' => $questionId, ':t' => $optionText, ':c' => ($correctIndex === $index ? 1 : 0)]);
+                }
             }
 
             $pdo->commit();
@@ -192,7 +214,7 @@ if ($moduleId > 0) {
         $quizId = (int) $quiz['id'];
 
         $qsStmt = $pdo->prepare(
-            'SELECT id, pergunta, ordem FROM quiz_questions WHERE quiz_id = :qid ORDER BY ordem ASC, id ASC'
+            'SELECT id, pergunta, tipo, ordem FROM quiz_questions WHERE quiz_id = :qid ORDER BY ordem ASC, id ASC'
         );
         $qsStmt->execute([':qid' => $quizId]);
         $questions = $qsStmt->fetchAll();
@@ -207,7 +229,7 @@ if ($moduleId > 0) {
         unset($question);
 
         $attStmt = $pdo->prepare(
-            'SELECT u.nome, u.email, qa.acertos, qa.total, qa.nota, qa.feito_em
+            'SELECT qa.id, qa.respostas, u.nome, u.email, qa.acertos, qa.total, qa.nota, qa.feito_em
              FROM quiz_attempts qa
              INNER JOIN users u ON u.id = qa.user_id
              WHERE qa.quiz_id = :qid
@@ -218,7 +240,7 @@ if ($moduleId > 0) {
 
         if ($editQuestionId > 0) {
             $eqStmt = $pdo->prepare(
-                'SELECT id, pergunta FROM quiz_questions WHERE id = :id AND quiz_id = :qid LIMIT 1'
+                'SELECT id, pergunta, tipo FROM quiz_questions WHERE id = :id AND quiz_id = :qid LIMIT 1'
             );
             $eqStmt->execute([':id' => $editQuestionId, ':qid' => $quizId]);
             $editQuestion = $eqStmt->fetch() ?: null;
@@ -312,7 +334,10 @@ if ($moduleId > 0) {
                         <?php foreach ($questions as $i => $question): ?>
                             <div class="quiz-admin-question">
                                 <div class="quiz-admin-question-head">
-                                    <strong><?= ($i + 1) ?>. <?= e($question['pergunta']) ?></strong>
+                                    <div>
+                                        <span class="badge badge-neutral"><?= $question['tipo'] === 'texto' ? 'Resposta aberta' : 'Múltipla escolha' ?></span>
+                                        <strong><?= ($i + 1) ?>. <?= e($question['pergunta']) ?></strong>
+                                    </div>
                                     <div class="inline-form">
                                         <a class="btn btn-ghost"
                                            href="<?= e(url($quizPath . '?module_id=' . $moduleId . '&edit_question=' . (int) $question['id'])) ?>">
@@ -327,7 +352,9 @@ if ($moduleId > 0) {
                                         </form>
                                     </div>
                                 </div>
-                                <?php if ($question['options']): ?>
+                                <?php if ($question['tipo'] === 'texto'): ?>
+                                    <p class="quiz-open-question-note">O aluno responderá em um campo de texto. Esta questão não entra na nota automática.</p>
+                                <?php elseif ($question['options']): ?>
                                     <ul class="quiz-admin-options">
                                         <?php foreach ($question['options'] as $li => $opt): ?>
                                             <li class="<?= (int) $opt['correta'] === 1 ? 'quiz-admin-opt-correct' : '' ?>">
@@ -361,6 +388,13 @@ if ($moduleId > 0) {
 
                         <label for="pergunta">Enunciado da pergunta</label>
                         <textarea id="pergunta" name="pergunta" rows="2" required><?= $editQuestion ? e($editQuestion['pergunta']) : '' ?></textarea>
+
+                        <?php $questionType = $editQuestion['tipo'] ?? 'multipla_escolha'; ?>
+                        <label for="questionType">Tipo de resposta</label>
+                        <select id="questionType" name="tipo">
+                            <option value="multipla_escolha" <?= $questionType === 'multipla_escolha' ? 'selected' : '' ?>>Múltipla escolha com correção automática</option>
+                            <option value="texto" <?= $questionType === 'texto' ? 'selected' : '' ?>>Resposta aberta para opinião ou comentário</option>
+                        </select>
 
                         <?php
                         $correctIndex = 0;
@@ -413,6 +447,7 @@ if ($moduleId > 0) {
 
                     const rows = document.getElementById('quizOptionRows');
                     const addButton = document.getElementById('addQuizOption');
+                    const typeSelect = document.getElementById('questionType');
                     const min = Number(builder.dataset.min || 2);
                     const max = Number(builder.dataset.max || 20);
 
@@ -424,6 +459,17 @@ if ($moduleId > 0) {
                             item.querySelector('[data-remove-option]').disabled = items.length <= min;
                         });
                         addButton.disabled = items.length >= max;
+                    }
+
+                    function updateQuestionType() {
+                        const isOpenQuestion = typeSelect.value === 'texto';
+                        builder.hidden = isOpenQuestion;
+                        builder.querySelectorAll('input, button').forEach((control) => {
+                            control.disabled = isOpenQuestion;
+                        });
+                        if (!isOpenQuestion) {
+                            updateRows();
+                        }
                     }
 
                     function addOption() {
@@ -446,6 +492,7 @@ if ($moduleId > 0) {
                     }
 
                     addButton.addEventListener('click', addOption);
+                    typeSelect.addEventListener('change', updateQuestionType);
                     rows.addEventListener('click', (event) => {
                         const removeButton = event.target.closest('[data-remove-option]');
                         if (!removeButton || rows.children.length <= min) return;
@@ -459,13 +506,13 @@ if ($moduleId > 0) {
                         updateRows();
                     });
 
-                    updateRows();
+                    updateQuestionType();
                 })();
                 </script>
 
                 <!-- ── Resultados dos alunos ──────────────────────────────── -->
                 <section class="panel">
-                    <div class="panel-header"><h2>Resultados dos alunos (<?= count($attempts) ?> tentativas)</h2></div>
+                    <div class="panel-header"><div><h2>Resultados dos alunos (<?= count($attempts) ?> tentativas)</h2><p>Abra “Ver respostas” para ler opiniões e comentários enviados.</p></div></div>
                     <?php if (!$attempts): ?>
                         <p>Nenhum aluno realizou este quiz ainda.</p>
                     <?php else: ?>
@@ -477,19 +524,41 @@ if ($moduleId > 0) {
                                     <th>E-mail</th>
                                     <th>Acertos</th>
                                     <th>Nota</th>
+                                    <th>Respostas abertas</th>
                                     <th>Data</th>
                                 </tr>
                                 </thead>
                                 <tbody>
                                 <?php foreach ($attempts as $att): ?>
+                                    <?php $attemptAnswers = json_decode((string) ($att['respostas'] ?? '{}'), true) ?: []; ?>
                                     <tr>
                                         <td><?= e($att['nome']) ?></td>
                                         <td><?= e($att['email']) ?></td>
                                         <td><?= e((string) $att['acertos']) ?>/<?= e((string) $att['total']) ?></td>
                                         <td>
-                                            <span class="badge <?= (int) $att['nota'] >= 60 ? 'badge-success' : 'badge-danger' ?>">
-                                                <?= e((string) $att['nota']) ?>%
-                                            </span>
+                                            <?php if ((int) $att['total'] > 0): ?>
+                                                <span class="badge <?= (int) $att['nota'] >= 60 ? 'badge-success' : 'badge-danger' ?>"><?= e((string) $att['nota']) ?>%</span>
+                                            <?php else: ?>
+                                                <span class="badge badge-neutral">Sem avaliação</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php $hasOpenAnswers = false; ?>
+                                            <?php foreach ($questions as $question): ?>
+                                                <?php if ($question['tipo'] === 'texto' && trim((string) ($attemptAnswers[$question['id']] ?? '')) !== '') { $hasOpenAnswers = true; break; } ?>
+                                            <?php endforeach; ?>
+                                            <?php if ($hasOpenAnswers): ?>
+                                                <details class="quiz-open-answers">
+                                                    <summary>Ver respostas</summary>
+                                                    <?php foreach ($questions as $question): ?>
+                                                        <?php if ($question['tipo'] === 'texto'): ?>
+                                                            <div><strong><?= e($question['pergunta']) ?></strong><p><?= nl2br(e((string) ($attemptAnswers[$question['id']] ?? 'Sem resposta.'))) ?></p></div>
+                                                        <?php endif; ?>
+                                                    <?php endforeach; ?>
+                                                </details>
+                                            <?php else: ?>
+                                                <span class="muted">Nenhuma</span>
+                                            <?php endif; ?>
                                         </td>
                                         <td><?= e((string) $att['feito_em']) ?></td>
                                     </tr>
